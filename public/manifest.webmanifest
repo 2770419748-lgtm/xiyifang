@@ -1,0 +1,9 @@
+{
+  "name": "洗衣房管理系统",
+  "short_name": "洗衣房",
+  "start_url": "./",
+  "display": "standalone",
+  "background_color": "#f4f4f1",
+  "theme_color": "#ffffff",
+  "icons": [{ "src": "icon.svg", "sizes": "any", "type": "image/svg+xml" }]
+}
