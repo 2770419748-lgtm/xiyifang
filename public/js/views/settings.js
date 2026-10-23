@@ -1,4 +1,5 @@
 import { api } from '../api.js';
+import { quotaUnit } from '../components/member.js';
 import { buildPages, fitText, printPages, sampleOrder } from '../print.js';
 import { store } from '../store.js';
 import { toast, toastError } from '../ui.js';
@@ -27,9 +28,19 @@ const clone = (o) => JSON.parse(JSON.stringify(o));
 export default {
   setup() {
     const s = reactive(clone(store.settings));
-    if (!s.package_limits) s.package_limits = {};
-    const unitOf = (name) => (name.includes('鞋') ? '双' : '件');
+    if (!Array.isArray(s.package_quotas)) s.package_quotas = [];
     const saving = ref(false);
+
+    // 包期额度：每项可以放多个品类，合并计算；一个品类只能放在一项里
+    const ownerOf = (id) => s.package_quotas.findIndex((g) => g.category_ids.includes(id));
+    function toggleCat(g, id) {
+      const i = g.category_ids.indexOf(id);
+      if (i >= 0) g.category_ids.splice(i, 1);
+      else g.category_ids.push(id);
+    }
+    const unitOfQuota = (g) => quotaUnit(store.categories.filter((c) => g.category_ids.includes(c.id)));
+    const addQuota = () => s.package_quotas.push({ category_ids: [], limit: 1 });
+    const removeQuota = (i) => s.package_quotas.splice(i, 1);
     const previewEl = ref(null);
     const findPaper = () => PAPERS.find((p) => p.width === s.label.width && p.height === s.label.height)?.key || 'custom';
     const paperSel = ref(findPaper());
@@ -84,7 +95,11 @@ export default {
       PAPERS,
       FIELDS,
       store,
-      unitOf,
+      ownerOf,
+      toggleCat,
+      unitOfQuota,
+      addQuota,
+      removeQuota,
       isReceipt,
       previewKind,
       previewHTML,
@@ -120,17 +135,32 @@ export default {
     <section class="card">
       <div class="card-head"><h3>包期会员</h3></div>
       <p class="muted small" style="margin:0 0 14px">
-        每周从周一到周日，按送来时间计算。开单时不提示超额，店长在“客户管理 → 包期会员”里按周查看，超额的会员排在最前面。
-        不填表示该品类不在包期内。开启金额时，包期会员开单时包期内的品类不收费，其他品类按单价计算。
-        学期结束时，到“客户管理”点击“学期结束”，输入登录密码后一键清除包期会员。
+        <span>每周从周一到周日，按送来时间计算。同一项额度里的品类合并计算，例如衣物和浴巾放在一项、每周 9 件，两样加起来超过 9 件就算超额；没放进任何一项的品类不在包期内。</span>
+        <span>开单时不提示超额，店长在“客户管理 → 包期会员”里按周查看，超额的会员排在最前面。开启金额时，包期会员开单时包期内的品类不收费，其他品类按单价计算。</span>
+        <span>学期结束时，到“客户管理”点击“学期结束”，输入登录密码后一键清除包期会员。</span>
       </p>
-      <div class="quota-grid">
-        <label v-for="c in store.categories" :key="c.id" class="field">
-          <span>{{ c.name }}（{{ unitOf(c.name) }}/周）</span>
-          <input type="number" min="0" max="999" placeholder="不在包期内"
-            :value="s.package_limits[c.id] ?? ''"
-            @input="s.package_limits[c.id] = $event.target.value === '' ? null : Number($event.target.value)">
-        </label>
+      <div class="quota-list">
+        <div v-for="(g, i) in s.package_quotas" :key="i" class="quota-item">
+          <div class="quota-item-head">
+            <b>额度 {{ i + 1 }}</b>
+            <span class="muted small">点选这一项包含的品类</span>
+            <span class="spacer"></span>
+            <button type="button" class="btn sm" @click="removeQuota(i)"><Icon name="trash" :size="14"/>删除</button>
+          </div>
+          <div class="cat-chips">
+            <button v-for="c in store.categories" :key="c.id" type="button" class="cat-chip"
+              :class="{ on: g.category_ids.includes(c.id) }"
+              :disabled="ownerOf(c.id) >= 0 && ownerOf(c.id) !== i"
+              :title="ownerOf(c.id) >= 0 && ownerOf(c.id) !== i ? '已在额度 ' + (ownerOf(c.id) + 1) + ' 里' : ''"
+              @click="toggleCat(g, c.id)">{{ c.name }}</button>
+          </div>
+          <label class="quota-limit">
+            每周合计不超过
+            <input v-model.number="g.limit" class="input" type="number" min="0" max="999" inputmode="numeric">
+            {{ unitOfQuota(g) }}
+          </label>
+        </div>
+        <button type="button" class="btn" @click="addQuota"><Icon name="plus" :size="16"/>添加一项额度</button>
       </div>
     </section>
 

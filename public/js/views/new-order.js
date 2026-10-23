@@ -28,8 +28,9 @@ export default {
     const priceOf = (id) => store.categories.find((c) => c.id === Number(id))?.price || 0;
     const totalQty = computed(() => Object.values(counts.value).reduce((s, n) => s + n, 0));
     const isMember = computed(() => customer.value.member_type === 'package');
-    // 自动金额：包期会员包期内的品类（设置了每周额度的）不收费，其他按单价算（与服务器计算一致）
-    const inPackage = (id) => isMember.value && Number.isInteger(store.settings.package_limits?.[id]);
+    // 自动金额：包期会员包期内的品类（放进了每周额度的）不收费，其他按单价算（与服务器计算一致）
+    const inPackage = (id) =>
+      isMember.value && (store.settings.package_quotas || []).some((g) => g.category_ids.includes(Number(id)));
     const autoAmount = computed(() =>
       Object.entries(counts.value).reduce((s, [id, n]) => (inPackage(id) ? s : s + n * priceOf(id)), 0),
     );

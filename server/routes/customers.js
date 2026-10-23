@@ -2,7 +2,7 @@ import { Router } from 'express';
 import { loginLimiter, requireLogin, requireManager, verifyPassword } from '../auth.js';
 import { q } from '../db.js';
 import { createCustomer, validateCustomer } from '../services/customers.js';
-import { packageCode, packageLimits, semesterEnd, setMembership, weekOf, weekUsage } from '../services/members.js';
+import { packageCode, packageQuotas, semesterEnd, setMembership, weekOf, weekUsage } from '../services/members.js';
 import { snapshotTo, backupDir } from '../backup.js';
 import path from 'node:path';
 import { addDays, diffDays, isDate, now, today } from '../time.js';
@@ -121,8 +121,8 @@ router.get('/', requireManager, (req, res) => {
 router.get('/package-week', requireManager, (req, res) => {
   const week = weekOf(isDate(req.query.date) ? req.query.date : today());
   const thisWeek = weekOf(today()).start;
-  const limits = packageLimits();
-  const usageOf = weekUsage(week, limits);
+  const quotas = packageQuotas();
+  const usageOf = weekUsage(week, quotas);
   const kw = String(req.query.q ?? '').trim().slice(0, 30);
   const { page, pageSize, offset } = pageParams(req.query);
   let where = `WHERE c.member_type = 'package'`;
@@ -150,7 +150,7 @@ router.get('/package-week', requireManager, (req, res) => {
       prev: addDays(week.start, -7),
       next: week.start < thisWeek ? addDays(week.start, 7) : null,
     },
-    limits,
+    quotas,
     total: rows.length,
     excess_count: rows.filter((r) => r.over > 0).length,
     page,
@@ -204,12 +204,12 @@ router.get('/:id/package-usage', requireManager, (req, res) => {
   const c = q.get('SELECT id, member_type FROM customers WHERE id = ?', Number(req.params.id));
   if (!c) throw new HttpError(404, '客户不存在');
   const week = weekOf(isDate(req.query.date) ? req.query.date : today());
-  const limits = packageLimits();
-  const { usage } = weekUsage(week, limits)(c.id);
+  const quotas = packageQuotas();
+  const { usage } = weekUsage(week, quotas)(c.id);
   res.json({
     member: c.member_type === 'package',
     week,
-    items: limits.map((l, i) => ({ ...l, used: usage[i].used })),
+    items: quotas.map((g, i) => ({ ...g, used: usage[i].used })),
   });
 });
 

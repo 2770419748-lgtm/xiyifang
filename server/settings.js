@@ -9,8 +9,9 @@ export const DEFAULT_SETTINGS = {
   overdue_days: 7,
   // 开单成功后弹出打印选项（全部打印 / 打印单张）
   auto_print: true,
-  // 包期会员每周额度 { 品类id: 数量 }，未设置时默认衣物 9 件、鞋子 1 双（见 defaultPackageLimits）
-  package_limits: null,
+  // 包期会员每周额度：[{ category_ids: [品类id…], limit: 数量 }]，同一项里的品类合并计算；
+  // 未设置时默认衣物 + 浴巾合计 9 件、鞋子 1 双（见 defaultPackageQuotas）
+  package_quotas: null,
   label: {
     width: 50, // 毫米
     height: 30, // 毫米；0 表示小票（高度随内容）
@@ -31,6 +32,7 @@ export function getSettings() {
   if (!cache) {
     const stored = {};
     for (const row of q.all('SELECT key, value FROM settings')) {
+      if (!(row.key in DEFAULT_SETTINGS)) continue; // 旧版本留下的设置项
       try {
         stored[row.key] = JSON.parse(row.value);
       } catch {
@@ -42,29 +44,34 @@ export function getSettings() {
       ...stored,
       label: { ...DEFAULT_SETTINGS.label, ...(stored.label || {}) },
     };
-    if (!cache.package_limits) cache.package_limits = defaultPackageLimits();
+    if (!cache.package_quotas) cache.package_quotas = defaultPackageQuotas();
   }
   return cache;
 }
 
-function defaultPackageLimits() {
-  const limits = {};
-  for (const c of q.all(`SELECT id, name FROM categories WHERE name IN ('衣物', '鞋子')`)) {
-    limits[c.id] = c.name === '衣物' ? 9 : 1;
-  }
-  return limits;
+function defaultPackageQuotas() {
+  const id = {};
+  for (const c of q.all(`SELECT id, name FROM categories WHERE name IN ('衣物', '浴巾', '鞋子')`)) id[c.name] = c.id;
+  return [
+    { category_ids: [id['衣物'], id['浴巾']].filter(Boolean), limit: 9 },
+    { category_ids: [id['鞋子']].filter(Boolean), limit: 1 },
+  ].filter((g) => g.category_ids.length);
 }
 
-// 包期额度：只保留存在的品类，数量为 0~999 的整数；空值表示该品类不在包期内
-function validatePackageLimits(input) {
-  if (typeof input !== 'object' || input === null) throw new HttpError(400, '包期额度设置不正确');
-  const ids = new Set(q.all('SELECT id FROM categories').map((c) => String(c.id)));
-  const out = {};
-  for (const [id, v] of Object.entries(input)) {
-    if (!ids.has(String(id)) || v === null || v === '' || v === undefined) continue;
-    out[id] = int(v, { label: '包期额度', min: 0, max: 999 });
-  }
-  return out;
+// 包期额度：每项至少选一个品类，同一个品类只能放在一项里，数量为 0~999 的整数
+function validatePackageQuotas(input) {
+  if (!Array.isArray(input) || input.length > 50) throw new HttpError(400, '包期额度设置不正确');
+  const names = new Map(q.all('SELECT id, name FROM categories').map((c) => [c.id, c.name]));
+  const used = new Set();
+  return input.map((g, i) => {
+    const ids = [...new Set((Array.isArray(g?.category_ids) ? g.category_ids : []).map(Number))].filter((id) => names.has(id));
+    if (!ids.length) throw new HttpError(400, `第 ${i + 1} 项额度还没有选品类`);
+    for (const id of ids) {
+      if (used.has(id)) throw new HttpError(400, `「${names.get(id)}」不能同时放在两项额度里`);
+      used.add(id);
+    }
+    return { category_ids: ids, limit: int(g.limit, { label: `第 ${i + 1} 项额度的数量`, min: 0, max: 999 }) };
+  });
 }
 
 function num(value, { label, min, max }) {
@@ -95,7 +102,7 @@ export function saveSettings(patch = {}) {
   if (patch.enable_price !== undefined) next.enable_price = bool(patch.enable_price);
   if (patch.auto_print !== undefined) next.auto_print = bool(patch.auto_print);
   if (patch.overdue_days !== undefined) next.overdue_days = int(patch.overdue_days, { label: '超期天数', min: 1, max: 365 });
-  if (patch.package_limits !== undefined) next.package_limits = validatePackageLimits(patch.package_limits);
+  if (patch.package_quotas !== undefined) next.package_quotas = validatePackageQuotas(patch.package_quotas);
   if (patch.label !== undefined) {
     if (typeof patch.label !== 'object' || patch.label === null) throw new HttpError(400, '标签设置不正确');
     next.label = validateLabel(patch.label, current.label);

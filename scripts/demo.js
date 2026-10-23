@@ -16,7 +16,7 @@ process.env.DATA_DIR = demoDir;
 const { q, tx } = await import('../server/db.js');
 const { hashPassword } = await import('../server/auth.js');
 const { saveSettings } = await import('../server/settings.js');
-const { packageLimits } = await import('../server/services/members.js');
+const { packageQuotas, weekOf, weekUsage } = await import('../server/services/members.js');
 const { nextOrderNo } = await import('../server/services/orders.js');
 const { addDays, now, shiftMinutes } = await import('../server/time.js');
 
@@ -94,11 +94,11 @@ function seedDemo() {
         id,
       );
     }
-    // 包期会员：包期内的品类（衣物、鞋子）不收费
+    // 包期会员：包期内的品类（衣物、浴巾、鞋子）不收费
     const memberSet = new Set(members);
-    const limited = new Set(packageLimits().map((l) => l.category_id));
+    const inPackage = new Set(packageQuotas().flatMap((g) => g.category_ids));
     const amountOf = (customerId, items) =>
-      items.reduce((s, i) => (memberSet.has(customerId) && limited.has(i.c.id) ? s : s + i.qty * i.c.price), 0);
+      items.reduce((s, i) => (memberSet.has(customerId) && inPackage.has(i.c.id) ? s : s + i.qty * i.c.price), 0);
 
     for (let d = 45; d >= 0; d--) {
       const day = addDays(today, -d);
@@ -181,12 +181,14 @@ function seedDemo() {
       }
     };
     const monday = addDays(today, -((new Date(`${today}T00:00:00Z`).getUTCDay() + 6) % 7));
-    addOrder(members[0], shiftMinutes(t, -50), [['衣物', 12]]);
+    addOrder(members[0], shiftMinutes(t, -50), [['衣物', 8], ['浴巾', 4]]);
     addOrder(members[1], shiftMinutes(t, -130), [['衣物', 4], ['鞋子', 2]]);
     addOrder(members[2], `${addDays(monday, -4)} 10:20:00`, [['衣物', 11]], `${addDays(monday, -2)} 17:40:00`);
   });
   saveSettings({ enable_price: true, shop_name: '阳光洗衣房（演示）' });
-  console.log('已生成演示数据。演示账号：店长 admin / admin123，店员 xiaoli / 123456（编码 8888 有 3 位客户；有 8 位包期会员，本周 2 位超额）');
+  const usageOf = weekUsage(weekOf(today));
+  const over = q.all(`SELECT id FROM customers WHERE member_type = 'package'`).filter((c) => usageOf(c.id).over > 0).length;
+  console.log(`已生成演示数据。演示账号：店长 admin / admin123，店员 xiaoli / 123456（编码 8888 有 3 位客户；有 8 位包期会员，本周 ${over} 位超额）`);
 }
 
 if (q.get('SELECT COUNT(*) AS n FROM users').n === 0) seedDemo();

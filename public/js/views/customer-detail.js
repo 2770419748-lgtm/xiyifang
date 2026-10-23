@@ -1,4 +1,5 @@
 import { api } from '../api.js';
+import { quotaList } from '../components/member.js';
 import { store } from '../store.js';
 import { confirm, toast, toastError } from '../ui.js';
 import { firstChar, fmtDateTime, fmtTime, money } from '../utils.js';
@@ -21,10 +22,7 @@ export default {
     // 设为包期会员后的编码（只有 4 位编码可以设）
     const upgradeCode = computed(() => (/^\d{4}$/.test(c.value?.code || '') ? `88${c.value.code}` : ''));
     const limitsText = computed(() => {
-      const limits = store.settings.package_limits || {};
-      const parts = store.categories
-        .filter((cat) => Number.isInteger(limits[cat.id]))
-        .map((cat) => `${cat.name} ${limits[cat.id]} ${cat.name.includes('鞋') ? '双' : '件'}`);
+      const parts = quotaList(store.settings.package_quotas, store.categories).map((g) => `${g.name} ${g.limit} ${g.unit}`);
       return parts.length ? parts.join('、') : '未设置';
     });
 

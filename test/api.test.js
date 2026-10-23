@@ -409,10 +409,10 @@ describe('包期会员', () => {
     assert.equal(r.data.customer_member_type, 'package');
   });
 
-  // 某位会员这一周各品类的 [已送, 超出]
+  // 某位会员这一周每项额度的 [已送, 超出]
   const usageOf = (week, name) => {
     const c = week.items.find((x) => x.name === name);
-    return Object.fromEntries(week.limits.map((l, i) => [l.name, [c.usage[i].used, c.usage[i].over]]));
+    return Object.fromEntries(week.quotas.map((g, i) => [g.name, [c.usage[i].used, c.usage[i].over]]));
   };
 
   let first;
@@ -440,9 +440,9 @@ describe('包期会员', () => {
     const usage = await manager.get(`/customers/${b.id}/package-usage`);
     assert.equal(usage.data.member, true);
     assert.equal(usage.data.week.start, shDate(-t.dow).str);
-    assert.equal(usage.data.items.find((i) => i.name === '衣物').used, 9);
+    assert.equal(usage.data.items.find((i) => i.name === '衣物+浴巾').used, 9);
     const thisWeek = (await manager.get('/customers/package-week')).data;
-    assert.deepEqual(usageOf(thisWeek, '学生乙')['衣物'], [9, 0]);
+    assert.deepEqual(usageOf(thisWeek, '学生乙')['衣物+浴巾'], [9, 0]);
     // 查看上周：学生乙上周超出 3 件
     const lastWeek = (await manager.get(`/customers/package-week?date=${lastSunday}`)).data;
     assert.deepEqual([lastWeek.week.ago, lastWeek.week.end, lastWeek.week.next], [1, lastSunday, shDate(-t.dow).str]);
@@ -453,13 +453,31 @@ describe('包期会员', () => {
     assert.equal((await clerk.get('/customers/package-week')).status, 403);
   });
 
+  test('浴巾和衣物合并计算：加起来超过 9 件算超额', async () => {
+    assert.deepEqual((await clerk.get('/settings')).data.package_quotas, [
+      { category_ids: [catId('衣物'), catId('浴巾')], limit: 9 },
+      { category_ids: [catId('鞋子')], limit: 1 },
+    ]);
+    // 学生乙本周已送 9 件衣物，再送 1 条浴巾：合计 10 件，超出 1 件
+    await manager.put(`/categories/${catId('浴巾')}`, { price: 800 });
+    const towel = await order(b, [['浴巾', 1]]);
+    assert.equal(towel.status, 201);
+    assert.equal(towel.data.amount, 0); // 浴巾也在包期内，不收费
+    const week = (await manager.get('/customers/package-week')).data;
+    assert.deepEqual(week.quotas.map((g) => `${g.name}${g.limit}${g.unit}`), ['衣物+浴巾9件', '鞋子1双']);
+    assert.deepEqual(usageOf(week, '学生乙'), { '衣物+浴巾': [10, 1], 鞋子: [0, 0] });
+    const usage = await manager.get(`/customers/${b.id}/package-usage`);
+    assert.deepEqual(usage.data.items.map((i) => [i.name, i.used, i.limit]), [['衣物+浴巾', 10, 9], ['鞋子', 0, 1]]);
+    await manager.post(`/orders/${towel.data.id}/cancel`, { reason: '测试' });
+  });
+
   test('周末查看：本周超额的包期会员置顶，超得多的在前', async () => {
     let week = (await manager.get('/customers/package-week')).data;
     assert.deepEqual([week.week.ago, week.week.next], [0, null]);
     assert.equal(week.excess_count, 1);
     assert.equal(week.items[0].name, '学生甲');
     assert.equal(week.items[0].over, 2);
-    assert.deepEqual(usageOf(week, '学生甲'), { 衣物: [10, 1], 鞋子: [2, 1] });
+    assert.deepEqual(usageOf(week, '学生甲'), { '衣物+浴巾': [10, 1], 鞋子: [2, 1] });
     assert.equal((await manager.get('/customers')).data.package_excess, 1);
     // 学生乙再送 4 件：超出 4 件，比学生甲多，排到最前面
     const more = await order(b, [['衣物', 4]]);
@@ -480,18 +498,29 @@ describe('包期会员', () => {
     assert.equal(r.status, 200);
     assert.equal(r.data.amount, 0);
     const week = (await manager.get('/customers/package-week')).data;
-    assert.deepEqual(usageOf(week, '学生甲')['衣物'], [11, 2]); // 8 + 本周另一单 3 件
+    assert.deepEqual(usageOf(week, '学生甲')['衣物+浴巾'], [11, 2]); // 8 + 本周另一单 3 件
   });
 
-  test('设置每周额度', async () => {
-    const r = await manager.put('/settings', { package_limits: { [catId('衣物')]: 12, [catId('鞋子')]: 2, [catId('床单')]: 1 } });
+  test('设置每周额度：同一项里的品类合并计算', async () => {
+    const quotas = (list) => list.map(([names, limit]) => ({ category_ids: names.map(catId), limit }));
+    // 衣物、浴巾、毛巾合计 12 件；鞋子 2 双；床单单独 1 件
+    const r = await manager.put('/settings', {
+      package_quotas: quotas([[['衣物', '浴巾', '毛巾'], 12], [['鞋子'], 2], [['床单'], 1]]),
+    });
     assert.equal(r.status, 200);
     const usage = await manager.get(`/customers/${b.id}/package-usage`);
-    assert.deepEqual(usage.data.items.map((i) => `${i.name}${i.limit}`), ['衣物12', '鞋子2', '床单1']);
+    assert.deepEqual(usage.data.items.map((i) => `${i.name}${i.limit}`), ['衣物+毛巾+浴巾12', '鞋子2', '床单1']);
     const week = (await manager.get('/customers/package-week')).data;
     assert.equal(week.excess_count, 0); // 额度调高后没人超额
-    assert.deepEqual(usageOf(week, '学生甲'), { 衣物: [11, 0], 鞋子: [2, 0], 床单: [1, 0] });
-    await manager.put('/settings', { package_limits: { [catId('衣物')]: 9, [catId('鞋子')]: 1 } });
+    assert.deepEqual(usageOf(week, '学生甲'), { '衣物+毛巾+浴巾': [11, 0], 鞋子: [2, 0], 床单: [1, 0] });
+    // 同一个品类不能放在两项里；每项至少选一个品类；数量要是 0~999 的整数
+    const bad = async (body) => (await manager.put('/settings', { package_quotas: body })).data.error;
+    assert.equal(await bad(quotas([[['衣物'], 9], [['衣物', '鞋子'], 1]])), '「衣物」不能同时放在两项额度里');
+    assert.equal(await bad(quotas([[['衣物'], 9], [[], 1]])), '第 2 项额度还没有选品类');
+    assert.equal(await bad(quotas([[['衣物'], -1]])), '第 1 项额度的数量不正确');
+    assert.equal(await bad({ 1: 9 }), '包期额度设置不正确');
+    // 恢复默认
+    await manager.put('/settings', { package_quotas: quotas([[['衣物', '浴巾'], 9], [['鞋子'], 1]]) });
   });
 
   test('新建客户时直接设为包期会员', async () => {

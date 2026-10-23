@@ -2024,10 +2024,69 @@ kbd {
   flex-wrap: wrap;
 }
 
-.quota-grid {
-  display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(140px, 1fr));
-  gap: 12px 14px;
+/* 系统设置：包期额度，每项可包含多个品类 */
+.quota-list {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 12px;
+}
+
+.quota-item {
+  align-self: stretch;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  padding: 12px 14px;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+}
+
+.quota-item-head {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.cat-chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.cat-chip {
+  height: 34px;
+  padding: 0 14px;
+  border: 1px solid var(--line-strong);
+  border-radius: 17px;
+  background: #fff;
+  color: var(--ink-2);
+  font: inherit;
+  font-size: 14px;
+  cursor: pointer;
+}
+
+.cat-chip.on {
+  border-color: var(--primary);
+  background: var(--primary-soft);
+  color: var(--primary);
+  font-weight: 600;
+}
+
+.cat-chip:disabled {
+  opacity: 0.35;
+  cursor: not-allowed;
+}
+
+.quota-limit {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 14px;
+}
+
+.quota-limit .input {
+  width: 88px;
 }
 
 /* 包期会员按周查看：超额的置顶并标红 */

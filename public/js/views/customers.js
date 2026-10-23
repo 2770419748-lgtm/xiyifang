@@ -125,7 +125,7 @@ export default {
     // 超额情况，如“衣物超出3件、鞋子超出1双”
     const overText = (c) =>
       c.usage
-        .map((u, i) => (u.over ? `${weekly.value.limits[i].name}超出${u.over}${weekly.value.limits[i].unit}` : ''))
+        .map((u, i) => (u.over ? `${weekly.value.quotas[i].name}超出${u.over}${weekly.value.quotas[i].unit}` : ''))
         .filter(Boolean)
         .join('、');
 
@@ -229,8 +229,8 @@ export default {
                   <span v-if="c.over" class="tag danger">超额</span>
                   <span class="spacer"></span><span v-if="c.pending_count" class="tag warn">在店 {{ c.pending_count }} 单</span></div>
                 <div class="list-sub">
-                  <template v-for="(u, i) in c.usage" :key="u.category_id"><template v-if="i"> · </template>{{ weekly.limits[i].name }}
-                    <span :class="{ 'over-text': u.over }">{{ u.used }}</span>/{{ weekly.limits[i].limit }}</template>
+                  <template v-for="(u, i) in c.usage" :key="i"><template v-if="i"> · </template>{{ weekly.quotas[i].name }}
+                    <span :class="{ 'over-text': u.over }">{{ u.used }}</span>/{{ weekly.quotas[i].limit }}</template>
                 </div>
                 <div v-if="c.over" class="list-sub over-text">{{ overText(c) }}</div>
               </div>
@@ -240,14 +240,14 @@ export default {
             <table class="table clickable">
               <thead><tr>
                 <th>姓名</th><th>编码</th>
-                <th v-for="l in weekly.limits" :key="l.category_id" class="num">{{ l.name }}（每周 {{ l.limit }} {{ l.unit }}）</th>
+                <th v-for="g in weekly.quotas" :key="g.name" class="num">{{ g.name }}（每周 {{ g.limit }} {{ g.unit }}）</th>
                 <th>超额情况</th><th>在店未取</th><th>最近送来</th>
               </tr></thead>
               <tbody>
                 <tr v-for="c in weekly.items" :key="c.id" :class="{ 'row-over': c.over }" @click="open(c)">
                   <td><b>{{ c.name }}</b></td>
                   <td><span class="code-badge">{{ c.code }}</span></td>
-                  <td v-for="u in c.usage" :key="u.category_id" class="num"><span :class="{ 'over-text': u.over }">{{ u.used }}</span></td>
+                  <td v-for="(u, i) in c.usage" :key="i" class="num"><span :class="{ 'over-text': u.over }">{{ u.used }}</span></td>
                   <td><span v-if="c.over" class="tag danger">{{ overText(c) }}</span><span v-else class="muted">—</span></td>
                   <td><span v-if="c.pending_count" class="tag warn">{{ c.pending_count }} 单</span><span v-else class="muted">—</span></td>
                   <td class="nowrap">{{ c.last_received_at ? fmtTime(c.last_received_at) : '—' }}</td>

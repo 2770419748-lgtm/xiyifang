@@ -15,22 +15,30 @@ export function weekOf(dt) {
   return { start, end: addDays(start, 6) };
 }
 
-export const unitOf = (name) => (name.includes('鞋') ? '双' : '件');
-
-// 设置了额度的品类：[{ category_id, name, unit, limit }]；没设额度的品类不在包期内
-export function packageLimits() {
-  const limits = getSettings().package_limits || {};
-  return q
-    .all('SELECT id, name FROM categories ORDER BY sort_order, id')
-    .filter((c) => Number.isInteger(limits[c.id]))
-    .map((c) => ({ category_id: c.id, name: c.name, unit: unitOf(c.name), limit: limits[c.id] }));
+/**
+ * 包期每周额度：[{ category_ids, name, unit, limit }]
+ * 同一项里的品类合并计算（如“衣物+浴巾”每周合计 9 件），不在任何一项里的品类不在包期内
+ */
+export function packageQuotas() {
+  const cats = q.all('SELECT id, name FROM categories ORDER BY sort_order, id');
+  return getSettings()
+    .package_quotas.map((g) => {
+      const list = cats.filter((c) => g.category_ids.includes(c.id));
+      return {
+        category_ids: list.map((c) => c.id),
+        name: list.map((c) => c.name).join('+'),
+        unit: list.every((c) => c.name.includes('鞋')) ? '双' : '件',
+        limit: g.limit,
+      };
+    })
+    .filter((g) => g.category_ids.length);
 }
 
 /**
- * 包期会员在某一周（周一至周日，按送来时间）各品类已送的件数和超出额度的件数
- * 返回函数：客户id → { usage: [{ category_id, used, over }]（与 limits 顺序一致）, over: 超出的总件数 }
+ * 包期会员在某一周（周一至周日，按送来时间）每项额度已送的件数和超出的件数
+ * 返回函数：客户id → { usage: [{ used, over }]（与 quotas 顺序一致）, over: 超出的总件数 }
  */
-export function weekUsage(week, limits = packageLimits()) {
+export function weekUsage(week, quotas = packageQuotas()) {
   const sent = new Map(); // 客户id → Map(品类id → 件数)
   const rows = q.all(
     `SELECT o.customer_id, i.category_id, SUM(i.quantity) AS qty
@@ -48,19 +56,20 @@ export function weekUsage(week, limits = packageLimits()) {
     sent.get(r.customer_id).set(r.category_id, r.qty);
   }
   return (customerId) => {
-    const usage = limits.map((l) => {
-      const used = sent.get(customerId)?.get(l.category_id) || 0;
-      return { category_id: l.category_id, used, over: Math.max(0, used - l.limit) };
+    const mine = sent.get(customerId);
+    const usage = quotas.map((g) => {
+      const used = g.category_ids.reduce((s, id) => s + (mine?.get(id) || 0), 0);
+      return { used, over: Math.max(0, used - g.limit) };
     });
     return { usage, over: usage.reduce((s, u) => s + u.over, 0) };
   };
 }
 
-// 包期会员的金额：包期内的品类（设置了每周额度的）不收费，其他品类按单价计算。
+// 包期会员的金额：包期内的品类（放进了每周额度的）不收费，其他品类按单价计算。
 // 开单时不提示超额，超额的由店长每周在“客户管理 → 包期会员”里查看
 export function packageAmount(items) {
-  const limited = new Set(packageLimits().map((l) => l.category_id));
-  return items.reduce((sum, it) => (limited.has(it.category_id) ? sum : sum + it.quantity * it.unit_price), 0);
+  const inPackage = new Set(packageQuotas().flatMap((g) => g.category_ids));
+  return items.reduce((sum, it) => (inPackage.has(it.category_id) ? sum : sum + it.quantity * it.unit_price), 0);
 }
 
 // 取消包期时恢复的编码：优先用记录的原编码，否则去掉开头的 88
