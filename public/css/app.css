@@ -2334,6 +2334,51 @@ kbd {
   gap: 1.2mm;
 }
 
+/* 高大于宽的标签（竖着走纸的水洗唛布带）：内容整体转 90°，沿长边排列 */
+.label.rotated {
+  position: relative;
+  display: block;
+}
+
+.label .lb-turn {
+  position: absolute;
+  top: 0;
+  left: 0;
+  box-sizing: border-box;
+  display: flex;
+  flex-direction: column;
+  justify-content: space-between;
+  overflow: hidden;
+  transform-origin: 0 0;
+}
+
+/* 简洁样式：只打编码和姓名，居中放大（字号 --t 约为标签高度的四分之一） */
+.label.simple,
+.label .lb-turn.simple {
+  justify-content: center;
+  gap: calc(var(--t) * 0.3);
+  text-align: center;
+}
+
+.label.simple > .lb-code,
+.label.simple > .lb-name,
+.label .simple > .lb-code,
+.label .simple > .lb-name {
+  font-size: var(--t);
+  font-weight: 700;
+  letter-spacing: 0;
+  line-height: 1.15;
+}
+
+/* 连续布带：每张末尾打一条虚线，沿虚线剪开 */
+.label.cut {
+  border-bottom: 0.3mm dashed #000;
+}
+
+.label.cut-end {
+  border-right: 0.3mm dashed #000;
+}
+
 .label.receipt {
   justify-content: flex-start;
   gap: 1.5mm;

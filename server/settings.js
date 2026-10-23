@@ -18,6 +18,10 @@ export const DEFAULT_SETTINGS = {
     padding: 1.5,
     copies: 1, // 全部打印、整单标签时每张打印几份
     font_scale: 1,
+    // 标签样式：standard 标准（姓名、编码、件数、单号等）/ simple 简洁（只打编码和姓名，适合水洗唛布带）
+    style: 'standard',
+    // 每张末尾打一条裁切虚线（连续布带用，沿虚线剪开）
+    cut_line: false,
     show_shop: true,
     show_time: true,
     show_items: true,
@@ -89,6 +93,11 @@ function validateLabel(input, current) {
   if (input.padding !== undefined) label.padding = num(input.padding, { label: '边距', min: 0, max: 10 });
   if (input.font_scale !== undefined) label.font_scale = num(input.font_scale, { label: '字体缩放', min: 0.6, max: 2 });
   if (input.copies !== undefined) label.copies = int(input.copies, { label: '打印份数', min: 1, max: 10 });
+  if (input.style !== undefined) {
+    if (!['standard', 'simple'].includes(input.style)) throw new HttpError(400, '标签样式不正确');
+    label.style = input.style;
+  }
+  if (input.cut_line !== undefined) label.cut_line = bool(input.cut_line);
   for (const key of ['show_shop', 'show_time', 'show_items', 'show_note', 'show_order_no']) {
     if (input[key] !== undefined) label[key] = bool(input[key]);
   }

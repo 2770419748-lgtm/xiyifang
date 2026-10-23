@@ -34,22 +34,50 @@ export function setPrintMethod(value) {
 const esc = (s) =>
   String(s ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[c]);
 
-// 字号随纸张大小缩放（以 50×30mm 标签 / 58mm 小票为基准）
-function scaleOf(L) {
-  const base = L.height ? Math.min(L.width / 50, L.height / 30) : L.width / 58;
-  return Math.round(base * L.font_scale * 100) / 100;
+const round2 = (n) => Math.round(n * 100) / 100;
+
+// 字号随纸张大小缩放（以 50×30mm 标签 / 58mm 小票为基准）；w、h 为文字方向上的宽和高
+function scaleOf(w, h, L) {
+  return round2((h ? Math.min(w / 50, h / 30) : w / 58) * L.font_scale);
 }
 
-function box(L, inner, extraClass = '') {
-  // 高度略小于纸张，避免四舍五入误差导致多出空白页；小票纸（高度 0）高度随内容
-  const h = L.height ? `height:${L.height - 0.3}mm;` : '';
-  const cls = `${extraClass}${L.height ? '' : ' auto'}`;
-  return `<div class="label${cls}" style="width:${L.width}mm;${h}padding:${L.padding}mm;--s:${scaleOf(L)}">${inner}</div>`;
+// 高大于宽的标签（如竖着走纸的水洗唛布带）打印时内容整体转 90°，沿长边排列
+export const isTurned = (L) => L.height > L.width;
+
+/**
+ * 一张标签（打印时为一页）
+ * upright：设置页预览时不旋转，显示剪下后横着看的样子
+ */
+function box(L, inner, extraClass = '', upright = false) {
+  // 小票纸（高度 0）：高度随内容
+  if (!L.height) {
+    return `<div class="label auto${extraClass}" style="width:${L.width}mm;padding:${L.padding}mm;--s:${scaleOf(L.width, 0, L)}">${inner}</div>`;
+  }
+  const h = L.height - 0.3; // 略小于纸张，避免四舍五入误差导致多出空白页
+  const turn = isTurned(L);
+  const [w2, h2] = turn ? [h, L.width] : [L.width, h]; // 文字方向上的宽和高
+  // --t：简洁样式的字号，约为标签高度的四分之一
+  const vars = `padding:${L.padding}mm;--s:${scaleOf(w2, h2, L)};--t:${round2(h2 * 0.24 * L.font_scale)}mm`;
+  // 裁切线打在每张末尾（走纸方向的下边）；转 90° 的标签横着看时在右边
+  const cut = L.cut_line ? (turn ? ' cut-end' : ' cut') : '';
+  if (!turn || upright) {
+    return `<div class="label${extraClass}${cut}" style="width:${w2}mm;height:${h2}mm;${vars}">${inner}</div>`;
+  }
+  return (
+    `<div class="label rotated${L.cut_line ? ' cut' : ''}" style="width:${L.width}mm;height:${h}mm">` +
+    `<div class="lb-turn${extraClass}" style="width:${h}mm;height:${L.width}mm;${vars};transform:translateX(${L.width}mm) rotate(90deg)">${inner}</div>` +
+    '</div>'
+  );
 }
 
 // 不干胶标签：传 piece 为单件标签（衣物 1/3），不传为整单汇总标签
-function stickerHTML(order, settings, piece) {
+function stickerHTML(order, settings, piece, upright) {
   const L = settings.label;
+  // 简洁样式：只打编码和姓名（编码在上）
+  if (L.style === 'simple') {
+    const inner = `<div class="lb-code fit">${esc(order.customer_code)}</div><div class="lb-name fit">${esc(order.customer_name)}</div>`;
+    return box(L, inner, ' simple', upright);
+  }
   const parts = [];
   if (L.show_shop || L.show_time) {
     parts.push(
@@ -71,7 +99,7 @@ function stickerHTML(order, settings, piece) {
   if (L.show_order_no) {
     parts.push(`<div class="lb-row lb-small"><span>${esc(order.order_no)}</span><span>共${order.total_qty}件</span></div>`);
   }
-  return box(L, parts.join(''));
+  return box(L, parts.join(''), '', upright);
 }
 
 // 小票纸上的整单取件小票
@@ -116,18 +144,19 @@ export function pieceList(order) {
  * 生成要打印的页面（每页一张标签）
  * job.kind：all 全部（每件一张）/ piece 单张（job.piece 为第几件）/ order 整单一张（小票纸为取件小票）
  * “全部”和“整单”按设置的份数重复，单张只打一张
+ * upright：设置页预览用，转 90° 的标签按横着看的样子显示
  */
-export function buildPages(order, settings, job = { kind: 'all' }) {
+export function buildPages(order, settings, job = { kind: 'all' }, { upright = false } = {}) {
   const L = settings.label;
   const copies = Math.max(1, L.copies || 1);
   const repeat = (pages) => pages.flatMap((p) => Array(copies).fill(p));
-  if (job.kind === 'order') return repeat([L.height ? stickerHTML(order, settings) : receiptHTML(order, settings)]);
+  if (job.kind === 'order') return repeat([L.height ? stickerHTML(order, settings, null, upright) : receiptHTML(order, settings)]);
   const pieces = pieceList(order);
   if (job.kind === 'piece') {
     const p = pieces[(job.piece || 1) - 1];
-    return p ? [stickerHTML(order, settings, p)] : [];
+    return p ? [stickerHTML(order, settings, p, upright)] : [];
   }
-  return repeat(pieces.map((p) => stickerHTML(order, settings, p)));
+  return repeat(pieces.map((p) => stickerHTML(order, settings, p, upright)));
 }
 
 // 姓名、编码太长时自动缩小字号，保证打印完整

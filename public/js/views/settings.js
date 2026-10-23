@@ -1,6 +1,6 @@
 import { api } from '../api.js';
 import { quotaUnit } from '../components/member.js';
-import { buildPages, fitText, printPages, sampleOrder } from '../print.js';
+import { buildPages, fitText, isTurned, printPages, sampleOrder } from '../print.js';
 import { store } from '../store.js';
 import { toast, toastError } from '../ui.js';
 
@@ -13,6 +13,8 @@ const PAPERS = [
   { key: '70x50', label: '不干胶标签 70×50mm', width: 70, height: 50 },
   { key: 'r58', label: '热敏小票 58mm', width: 58, height: 0 },
   { key: 'r80', label: '热敏小票 80mm', width: 80, height: 0 },
+  // 水洗唛布带：宽度固定，每张长度可改；选中时默认简洁样式、打裁切线
+  { key: 'tape30', label: '水洗唛布带 30mm 宽', width: 30, height: 40, tape: true },
 ];
 
 const FIELDS = [
@@ -42,20 +44,29 @@ export default {
     const addQuota = () => s.package_quotas.push({ category_ids: [], limit: 1 });
     const removeQuota = (i) => s.package_quotas.splice(i, 1);
     const previewEl = ref(null);
-    const findPaper = () => PAPERS.find((p) => p.width === s.label.width && p.height === s.label.height)?.key || 'custom';
+    const findPaper = () =>
+      PAPERS.find((p) => p.width === s.label.width && (p.tape ? s.label.height > 0 : p.height === s.label.height))?.key ||
+      'custom';
     const paperSel = ref(findPaper());
+    const isTape = computed(() => !!PAPERS.find((p) => p.key === paperSel.value)?.tape);
 
     function onPaper() {
       const p = PAPERS.find((x) => x.key === paperSel.value);
       if (p) Object.assign(s.label, { width: p.width, height: p.height });
+      if (p?.tape) Object.assign(s.label, { style: 'simple', cut_line: true });
+      else if (p) s.label.cut_line = false;
     }
 
     const isReceipt = computed(() => !Number(s.label.height));
+    const turned = computed(() => isTurned(s.label));
     // 预览：单件标签（全部打印、打印单张用）或整单标签（小票纸为取件小票）
     const previewKind = ref('piece');
     const previewJob = computed(() => (previewKind.value === 'piece' ? { kind: 'piece', piece: 1 } : { kind: 'order' }));
-    const previewHTML = computed(() => buildPages(sampleOrder(), s, previewJob.value)[0]);
-    const previewZoom = computed(() => (isReceipt.value ? 1.2 : Math.min(3, 300 / (s.label.width * 3.78))));
+    // 转 90° 打印的标签（竖着走纸的布带）预览时按剪下后横着看的样子显示
+    const previewHTML = computed(() => buildPages(sampleOrder(), s, previewJob.value, { upright: true })[0]);
+    const previewZoom = computed(() =>
+      isReceipt.value ? 1.2 : Math.min(3, 300 / ((turned.value ? s.label.height : s.label.width) * 3.78)),
+    );
 
     watch(
       previewHTML,
@@ -92,6 +103,8 @@ export default {
       saving,
       previewEl,
       paperSel,
+      isTape,
+      turned,
       PAPERS,
       FIELDS,
       store,
@@ -179,6 +192,10 @@ export default {
             <label class="field"><span>宽度（毫米）</span><input v-model.number="s.label.width" type="number" min="20" max="120"></label>
             <label class="field"><span>高度（毫米，0 = 小票）</span><input v-model.number="s.label.height" type="number" min="0" max="200"></label>
           </div>
+          <label class="field" v-if="isTape">
+            <span>每张长度（毫米） <span class="hint">剪下来一张标签的长度</span></span>
+            <input v-model.number="s.label.height" type="number" min="10" max="200">
+          </label>
           <div class="customer-inputs">
             <label class="field"><span>每张打印份数 <span class="hint">全部打印、整单时</span></span><input v-model.number="s.label.copies" type="number" min="1" max="10"></label>
             <label class="field">
@@ -193,12 +210,22 @@ export default {
             </label>
           </div>
           <label class="field"><span>页边距（毫米）</span><input v-model.number="s.label.padding" type="number" min="0" max="10" step="0.5"></label>
-          <div class="field">
+          <label class="field">
+            <span>标签样式</span>
+            <select v-model="s.label.style">
+              <option value="standard">标准（姓名、编码、件数、单号等）</option>
+              <option value="simple">简洁（只打编码和姓名，适合水洗唛）</option>
+            </select>
+          </label>
+          <div class="field" v-if="s.label.style !== 'simple'">
             <span>打印内容 <span class="hint">姓名和编码始终打印</span></span>
             <div class="row wrap" style="gap:14px">
               <label v-for="f in FIELDS" :key="f.key" class="check"><input type="checkbox" v-model="s.label[f.key]">{{ f.label }}</label>
             </div>
           </div>
+          <label class="check" v-if="!isReceipt">
+            <input type="checkbox" v-model="s.label.cut_line">每张末尾打一条裁切虚线（整卷布带不分段时用，沿虚线剪开）
+          </label>
         </div>
         <div class="form-stack">
           <div class="seg" style="align-self:flex-start">
@@ -209,6 +236,7 @@ export default {
             <div ref="previewEl" class="label-preview" :style="{ zoom: previewZoom }" v-html="previewHTML"></div>
           </div>
           <button type="button" class="btn" @click="testPrint"><Icon name="printer" :size="16"/>按当前设置打印一张测试</button>
+          <p v-if="turned" class="notice info small" style="margin:0">布带竖着走纸，打印时文字会自动转 90°，沿布带方向排列；上面的预览是剪下后横着看的样子。</p>
           <p class="muted small" style="margin:0">开单后的“全部打印”“打印单张”使用单件标签（每件衣物一张）；整单标签可在打印窗口中选择。预览为放大显示，测试满意后记得点击下方“保存设置”。</p>
         </div>
       </div>
