@@ -37,8 +37,8 @@ const routes = [
   { path: '/', redirect: '/new' },
   { path: '/new', component: NewOrderView, meta: { title: '开单' } },
   { path: '/pickup', component: PickupView, meta: { title: '取货' } },
-  { path: '/orders', component: OrdersView, meta: { title: '订单查询', manager: true } },
-  { path: '/orders/:id', component: OrderDetailView, meta: { title: '订单详情', manager: true, nav: '/orders', back: '/orders' } },
+  { path: '/orders', component: OrdersView, meta: { title: '订单查询' } },
+  { path: '/orders/:id', component: OrderDetailView, meta: { title: '订单详情', nav: '/orders', back: '/orders' } },
   { path: '/customers', component: CustomersView, meta: { title: '客户管理', manager: true, tab: '/more' } },
   { path: '/customers/:id', component: CustomerDetailView, meta: { title: '客户详情', manager: true, nav: '/customers', tab: '/more', back: '/customers' } },
   { path: '/stats', component: StatsView, meta: { title: '经营数据', manager: true } },
@@ -88,7 +88,7 @@ onUnauthorized(() => {
 const MENU = [
   { to: '/new', label: '开单', icon: 'filePlus' },
   { to: '/pickup', label: '取货', icon: 'packageCheck' },
-  { to: '/orders', label: '订单查询', icon: 'search', manager: true },
+  { to: '/orders', label: '订单查询', icon: 'search' },
   { to: '/customers', label: '客户管理', icon: 'users', manager: true },
   { to: '/stats', label: '经营数据', icon: 'chart', manager: true },
   { group: '管理', manager: true },
@@ -111,6 +111,7 @@ const TABS_MANAGER = [
 const TABS_CLERK = [
   { to: '/new', label: '开单', icon: 'filePlus' },
   { to: '/pickup', label: '取货', icon: 'packageCheck' },
+  { to: '/orders', label: '查询', icon: 'search' },
   { to: '/me', label: '我的', icon: 'user' },
 ];
 

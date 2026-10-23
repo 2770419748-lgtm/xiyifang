@@ -127,9 +127,9 @@ router.post('/pickup', requireLogin, (req, res) => {
   res.json({ ok: true, count: ids.length, picked_at: pickedAt });
 });
 
-// ---------- 仅店长 ----------
+// ---------- 订单查询：店员也可以查看；导出、修改、作废、恢复、撤销取件仅店长 ----------
 
-router.get('/', requireManager, (req, res) => {
+router.get('/', requireLogin, (req, res) => {
   const { where, params, orderBy } = buildOrderFilter(req.query);
   const { page, pageSize, offset } = pageParams(req.query);
   // 合计（单数、件数、金额）不算作废单，除非筛选的就是作废单；total 为分页用的全部匹配数
@@ -158,7 +158,8 @@ router.get('/', requireManager, (req, res) => {
     total: s.total,
     orders: s.orders,
     qty: s.qty,
-    amount: s.amount,
+    // 合计金额相当于这段时间的营业额，只给店长看（每单的金额店员照样能看到）
+    amount: req.user.role === 'manager' ? s.amount : null,
     category_qty: categoryQty,
     page,
     page_size: pageSize,
@@ -208,7 +209,7 @@ router.get('/export', requireManager, (req, res) => {
   res.send(`﻿${lines.join('\r\n')}`);
 });
 
-router.get('/:id', requireManager, (req, res) => {
+router.get('/:id', requireLogin, (req, res) => {
   const order = getOrder(Number(req.params.id));
   if (!order) throw new HttpError(404, '订单不存在');
   res.json(order);

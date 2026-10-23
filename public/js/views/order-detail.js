@@ -1,7 +1,7 @@
 import { api } from '../api.js';
 import { chooseOnCodeConflict, isCodeConflict } from '../components/pickers.js';
 import { openPrintDialog } from '../components/print-dialog.js';
-import { store } from '../store.js';
+import { isManager, store } from '../store.js';
 import { confirm, prompt, toast, toastError } from '../ui.js';
 import { CODE_RE, daysSince, fenToYuan, fmtDateTime, money, toInput, yuanToFen } from '../utils.js';
 
@@ -172,7 +172,9 @@ export default {
 
     watch(() => route.params.id, (id) => id && load(), { immediate: true });
 
-    return { order, notFound, editing, busy, enablePrice, days, pickup, unpickup, cancel, restore, print, onSaved, fmtDateTime, money };
+    // 店员可以查看、确认取件、打印待取订单；修改、作废、恢复、撤销取件只有店长能做
+    const manager = isManager();
+    return { order, notFound, editing, busy, enablePrice, days, manager, pickup, unpickup, cancel, restore, print, onSaved, fmtDateTime, money };
   },
   template: `
   <div class="page" v-if="order">
@@ -183,18 +185,19 @@ export default {
           <div class="muted small">录入时间 {{ fmtDateTime(order.created_at) }}</div>
         </div>
         <div class="btn-row">
-          <button type="button" class="btn" @click="print"><Icon name="printer" :size="16"/>打印标签</button>
-          <button type="button" class="btn" v-if="order.status !== 'cancelled'" @click="editing = true"><Icon name="edit" :size="16"/>修改</button>
+          <button type="button" class="btn" v-if="manager || order.status === 'pending'" @click="print"><Icon name="printer" :size="16"/>打印标签</button>
+          <button type="button" class="btn" v-if="manager && order.status !== 'cancelled'" @click="editing = true"><Icon name="edit" :size="16"/>修改</button>
           <button type="button" class="btn primary" v-if="order.status === 'pending'" :disabled="busy" @click="pickup"><Icon name="check" :size="16"/>确认取件</button>
-          <button type="button" class="btn" v-if="order.status === 'picked'" :disabled="busy" @click="unpickup">撤销取件</button>
-          <button type="button" class="btn danger" v-if="order.status !== 'cancelled'" :disabled="busy" @click="cancel">作废</button>
-          <button type="button" class="btn" v-if="order.status === 'cancelled'" :disabled="busy" @click="restore">恢复订单</button>
+          <button type="button" class="btn" v-if="manager && order.status === 'picked'" :disabled="busy" @click="unpickup">撤销取件</button>
+          <button type="button" class="btn danger" v-if="manager && order.status !== 'cancelled'" :disabled="busy" @click="cancel">作废</button>
+          <button type="button" class="btn" v-if="manager && order.status === 'cancelled'" :disabled="busy" @click="restore">恢复订单</button>
         </div>
       </div>
       <div class="info-grid">
         <div>
           <div class="label">客户</div>
-          <RouterLink :to="'/customers/' + order.customer_id"><b>{{ order.customer_name }}</b></RouterLink>
+          <RouterLink v-if="manager" :to="'/customers/' + order.customer_id"><b>{{ order.customer_name }}</b></RouterLink>
+          <b v-else>{{ order.customer_name }}</b>
           <span class="code-badge" style="margin-left:6px">{{ order.customer_code }}</span>
           <span v-if="order.customer_member_type === 'package'" class="tag info plain" style="margin-left:6px">包期会员</span>
         </div>

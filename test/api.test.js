@@ -100,7 +100,6 @@ describe('权限', () => {
   test('店员不能访问店长功能', async () => {
     for (const [method, url] of [
       ['get', '/stats'],
-      ['get', '/orders'],
       ['get', '/orders/export'],
       ['get', '/customers'],
       ['get', '/users'],
@@ -229,6 +228,21 @@ describe('取货', () => {
 });
 
 describe('店长：查询、修改、统计', () => {
+  test('店员可以查询订单、看详情；不能导出、修改、作废，看不到合计金额', async () => {
+    const list = await clerk.get('/orders?q=1234');
+    assert.equal(list.status, 200);
+    assert.ok(list.data.items.some((o) => o.id === order1.id));
+    assert.equal(list.data.amount, null);
+    assert.equal(typeof (await manager.get('/orders')).data.amount, 'number');
+    const detail = await clerk.get(`/orders/${order1.id}`);
+    assert.equal(detail.status, 200);
+    assert.equal(detail.data.customer_name, '张三');
+    assert.equal((await clerk.get('/orders/export')).status, 403);
+    assert.equal((await clerk.put(`/orders/${order1.id}`, { note: '改一下' })).status, 403);
+    assert.equal((await clerk.post(`/orders/${order1.id}/cancel`)).status, 403);
+    assert.equal((await clerk.post(`/orders/${order1.id}/unpickup`)).status, 403);
+  });
+
   test('按状态、品类、关键词查询订单', async () => {
     const picked = await manager.get('/orders?status=picked');
     assert.equal(picked.data.total, 2);

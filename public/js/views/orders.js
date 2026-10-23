@@ -1,5 +1,5 @@
 import { api } from '../api.js';
-import { store } from '../store.js';
+import { isManager, store } from '../store.js';
 import { toastError } from '../ui.js';
 import { DATE_PRESETS, localDate, matchPreset, money, presetRange, screen } from '../utils.js';
 
@@ -121,7 +121,27 @@ export default {
 
     const openOrder = (o) => router.push(`/orders/${o.id}`);
 
-    return { store, screen, f, presetSel, data, loading, categories, categoryName, showFilters, activeCount, DATE_PRESETS, apply, goPage, reset, onPreset, exportHref, openOrder, money };
+    return {
+      store,
+      screen,
+      f,
+      presetSel,
+      data,
+      loading,
+      categories,
+      categoryName,
+      showFilters,
+      activeCount,
+      DATE_PRESETS,
+      apply,
+      goPage,
+      reset,
+      onPreset,
+      exportHref,
+      openOrder,
+      money,
+      isManager,
+    };
   },
   template: `
   <div class="page">
@@ -166,11 +186,11 @@ export default {
       <span>
         共 <b>{{ data.orders }}</b> 单
         <template v-if="data.category_qty !== null"> · 其中「{{ categoryName }}」<b>{{ data.category_qty }}</b> 件</template>
-        <template v-else> · <b>{{ data.qty }}</b> 件<template v-if="store.settings.enable_price"> · <b>{{ money(data.amount) }}</b></template></template>
+        <template v-else> · <b>{{ data.qty }}</b> 件<template v-if="store.settings.enable_price && data.amount !== null"> · <b>{{ money(data.amount) }}</b></template></template>
         <span class="muted" v-if="data.total > data.orders">（另有 {{ data.total - data.orders }} 单已作废，不计入合计）</span>
       </span>
       <span class="spacer"></span>
-      <a class="btn sm" :href="exportHref"><Icon name="download" :size="16"/>导出 Excel</a>
+      <a v-if="isManager()" class="btn sm" :href="exportHref"><Icon name="download" :size="16"/>导出 Excel</a>
     </div>
 
     <section class="card flush">
