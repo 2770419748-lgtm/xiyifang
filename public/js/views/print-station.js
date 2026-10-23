@@ -78,9 +78,8 @@ export default {
       <ol class="steps">
         <li>只需在<b>连着打印机的那台电脑</b>上开启打印站（同一时间只能有一台）。开启后在本系统任何页面都会在后台自动打印，刷新或重新登录后自动继续。</li>
         <li>手机等设备在“我的 → 本机打印方式”中选择“发送到打印站”，开单后标签会自动从这台电脑打印。</li>
-        <li>保持浏览器窗口打开（不要最小化）。建议把标签打印机设为 Windows <b>默认打印机</b>，并用以下方式启动 Chrome，实现<b>不弹对话框直接打印</b>：<br>
-          在 Chrome 快捷方式的“目标”末尾加上 <kbd>--kiosk-printing</kbd>，例如：<br>
-          <kbd>"C:\\Program Files\\Google\\Chrome\\Application\\chrome.exe" --kiosk-printing</kbd></li>
+        <li>保持浏览器窗口打开（不要最小化）。建议把标签打印机设为 Windows <b>默认打印机</b>，并双击系统文件夹里的
+          <kbd>open-direct-print.bat</kbd> 打开系统，这样<b>不弹打印预览、直接打印</b>（也可以在 Edge / Chrome 快捷方式的“目标”末尾加上 <kbd>--kiosk-printing</kbd>）。</li>
         <li>第一次使用请先点“打印测试标签”，确认纸张尺寸和位置正确。</li>
       </ol>
       <div class="btn-row" style="margin-top:14px">
