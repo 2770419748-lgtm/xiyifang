@@ -56,7 +56,9 @@ export const CustomerPicker = {
       },
     );
 
+    // 已经选中客户后，晚到的联想结果不再显示（否则“更换”后会残留旧的高亮项，回车会选错人）
     const search = debounce(async (kw) => {
+      if (props.modelValue.id) return;
       const mine = ++seq;
       if (!kw) {
         suggestions.value = [];
@@ -64,26 +66,35 @@ export const CustomerPicker = {
       }
       try {
         const rows = await api.get('/customers/search', { q: kw });
-        if (mine !== seq) return;
+        if (mine !== seq || props.modelValue.id) return;
         suggestions.value = rows;
         // 编码只对应一位客户时才默认高亮，回车直接选中；多位客户时要店员自己选
+        // 已经填了姓名时，编码和姓名都对上才高亮（避免把同编码的另一位客户选上）
         const typed = props.modelValue.code;
-        const exact = rows.filter((c) => c.code === typed || c.base_code === typed);
+        const name = props.modelValue.name.trim();
+        const exact = rows.filter((c) => (c.code === typed || c.base_code === typed) && (!name || c.name === name));
         active.value = exact.length === 1 ? rows.indexOf(exact[0]) : -1;
       } catch {
         // 联想失败不影响开单
       }
     }, 200);
 
-    // 编码输完后：如果这个编码有多位客户，弹出姓名选择
+    // 编码输完后（先填姓名、再填编码）：
+    // 这个编码下正好有同名客户就直接选中；编码有多位客户，或者填的姓名对不上，弹出选择（也可以选“新客户”）
     async function checkCode() {
       const code = props.modelValue.code;
       if (!CODE_RE.test(code) || props.modelValue.id || props.modelValue.isNew || askedCode === code) return false;
       askedCode = code;
+      const name = props.modelValue.name.trim();
       try {
         const list = await api.get('/customers/search', { code });
         if (props.modelValue.code !== code || props.modelValue.id) return false;
-        if (list.length < 2) return false;
+        const same = name ? list.filter((c) => c.name === name) : [];
+        if (same.length === 1) {
+          pick(same[0]);
+          return true;
+        }
+        if (list.length < 2 && !(name && list.length)) return false;
         open.value = false;
         chooser.value = { code, list };
         return true;
@@ -97,12 +108,14 @@ export const CustomerPicker = {
       if (v !== e.target.value) e.target.value = v;
       update({ code: v, isNew: false });
       open.value = true;
+      active.value = -1; // 等新的联想结果回来再高亮，回车不会选到旧的
       search(v);
     }
 
     function onName(e) {
       update({ name: e.target.value });
       open.value = true;
+      active.value = -1;
       search(e.target.value.trim());
     }
 
@@ -119,19 +132,23 @@ export const CustomerPicker = {
       chooser.value = null;
     }
 
-    // 弹窗里选“新客户”：保留编码，填写姓名
+    // 弹窗里选“新客户”：保留编码和已经填的姓名，没填姓名时把光标放到姓名框
     function chooseNew() {
       const { code } = chooser.value;
       chooser.value = null;
-      emit('update:modelValue', { id: null, name: '', code, isNew: true });
-      nextTick(() => nameEl.value?.focus());
+      const name = props.modelValue.name;
+      emit('update:modelValue', { id: null, name, code, isNew: true });
+      if (!name.trim()) nextTick(() => nameEl.value?.focus());
     }
 
     function clear() {
       emit('update:modelValue', { id: null, name: '', code: '' });
+      seq++;
+      suggestions.value = [];
+      active.value = -1;
       codeTouched.value = false;
       askedCode = '';
-      nextTick(() => codeEl.value?.focus());
+      nextTick(() => nameEl.value?.focus());
     }
 
     function onKey(e) {
@@ -157,21 +174,33 @@ export const CustomerPicker = {
           return;
         }
       }
-      // 编码框回车：同编码多位客户时弹出选择，否则跳到姓名
-      if (e.key === 'Enter' && e.target === codeEl.value) {
+      // 先填姓名再填编码：姓名框回车跳到编码框；编码框回车检查编码（同编码多位客户时弹出选择）
+      if (e.key === 'Enter' && e.target === nameEl.value) {
         e.preventDefault();
-        checkCode().then((shown) => !shown && nameEl.value?.focus());
+        codeEl.value?.focus();
+      } else if (e.key === 'Enter' && e.target === codeEl.value) {
+        e.preventDefault();
+        checkCode();
       }
     }
 
-    const close = () => setTimeout(() => (open.value = false), 150);
+    // 离开输入框稍后收起联想（让点击联想项先生效）；光标进到另一个输入框时取消，不然刚打开的联想会被收起
+    let closeTimer = null;
+    function close() {
+      clearTimeout(closeTimer);
+      closeTimer = setTimeout(() => (open.value = false), 150);
+    }
+    function onFocus() {
+      clearTimeout(closeTimer);
+      open.value = true;
+    }
     function onCodeBlur() {
       codeTouched.value = true;
       close();
       checkCode();
     }
 
-    expose({ focus: () => codeEl.value?.focus() });
+    expose({ focus: () => nameEl.value?.focus() });
     return {
       codeEl,
       nameEl,
@@ -187,6 +216,7 @@ export const CustomerPicker = {
       clear,
       onKey,
       close,
+      onFocus,
       onCodeBlur,
       firstChar,
       fmtTime,
@@ -208,20 +238,20 @@ export const CustomerPicker = {
     <template v-else>
       <div class="customer-inputs">
         <label class="field">
+          <span>姓名 <span v-if="modelValue.isNew" class="hint">新客户，与老客户共用编码 {{ modelValue.code }}</span></span>
+          <input ref="nameEl" :value="modelValue.name" maxlength="30" placeholder="输入姓名" autocomplete="off"
+            @input="onName" @keydown="onKey" @focus="onFocus" @blur="close">
+        </label>
+        <label class="field">
           <span>编码 <span class="hint">4 位或 6 位数字</span></span>
           <input ref="codeEl" class="code-input" :class="{ invalid: codeError }" :value="modelValue.code"
             inputmode="numeric" pattern="[0-9]*" maxlength="6" placeholder="输入编码" autocomplete="off"
-            @input="onCode" @keydown="onKey" @focus="open = true" @blur="onCodeBlur">
+            @input="onCode" @keydown="onKey" @focus="onFocus" @blur="onCodeBlur">
           <span class="field-error" v-if="codeError">{{ codeError }}</span>
-        </label>
-        <label class="field">
-          <span>姓名 <span v-if="modelValue.isNew" class="hint">新客户，与老客户共用编码 {{ modelValue.code }}</span></span>
-          <input ref="nameEl" :value="modelValue.name" maxlength="30" placeholder="输入姓名" autocomplete="off"
-            @input="onName" @keydown="onKey" @focus="open = true" @blur="close">
         </label>
       </div>
       <ul class="suggest" v-if="open && suggestions.length">
-        <li class="hint-row">选择老客户（新客户直接填写编码和姓名即可）</li>
+        <li class="hint-row">选择老客户（新客户直接填写姓名和编码即可）</li>
         <li v-for="(c, i) in suggestions" :key="c.id" :class="{ active: i === active }"
           @mousedown.prevent @click="pick(c)">
           <div class="avatar">{{ firstChar(c.name) }}</div>
@@ -245,7 +275,7 @@ export const CustomerPicker = {
         </button>
       </div>
       <button type="button" class="btn block" style="margin-top:12px" @click="chooseNew">
-        <Icon name="plus" :size="16"/>新客户（使用编码 {{ chooser.code }}）
+        <Icon name="plus" :size="16"/>新客户{{ modelValue.name.trim() ? '「' + modelValue.name.trim() + '」' : '' }}（使用编码 {{ chooser.code }}）
       </button>
     </Modal>
   </div>`,
