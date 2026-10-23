@@ -366,15 +366,21 @@ describe('金额与设置', () => {
     assert.equal((await manager.del(`/categories/${r.data.id}`)).status, 200);
   });
 
-  test('标签样式：简洁（只打编码和姓名）、水洗唛布带裁切线', async () => {
-    const r = await manager.put('/settings', { label: { width: 30, height: 40, style: 'simple', cut_line: true } });
+  test('标签：水洗唛布带，编号和姓名的位置、字号分开设置', async () => {
+    const d = (await clerk.get('/settings')).data.label;
+    assert.deepEqual([d.width, d.height, d.cut_line], [30, 40, true]);
+    assert.deepEqual([d.code, d.name], [{ x: 50, y: 34, size: 7 }, { x: 50, y: 68, size: 7.5 }]);
+    assert.equal(d.style, undefined); // 旧版的样式、店名等选项已去掉
+    const r = await manager.put('/settings', { label: { height: 45, code: { x: 30.25, y: 40, size: 9 }, name: { size: 6 } } });
     assert.equal(r.status, 200);
-    const L = r.data.label;
-    assert.deepEqual([L.width, L.height, L.style, L.cut_line], [30, 40, 'simple', true]);
-    assert.equal((await manager.put('/settings', { label: { style: 'fancy' } })).data.error, '标签样式不正确');
-    assert.equal((await clerk.put('/settings', { label: { style: 'standard' } })).status, 403);
-    assert.equal((await clerk.get('/settings')).data.label.style, 'simple');
-    await manager.put('/settings', { label: { width: 50, height: 30, style: 'standard', cut_line: false } });
+    assert.deepEqual([r.data.label.height, r.data.label.code, r.data.label.name], [45, { x: 30.3, y: 40, size: 9 }, { x: 50, y: 68, size: 6 }]);
+    const bad = async (label) => (await manager.put('/settings', { label })).data.error;
+    assert.equal(await bad({ code: { x: 120 } }), '编号的位置应在 0~100 之间');
+    assert.equal(await bad({ name: { size: 50 } }), '姓名的字号应在 2~30 之间');
+    assert.equal(await bad({ width: 5 }), '布带宽度应在 10~110 之间');
+    assert.equal(await bad({ height: 0 }), '每张长度应在 10~200 之间');
+    assert.equal((await clerk.put('/settings', { label: { height: 40 } })).status, 403);
+    await manager.put('/settings', { label: { height: 40, code: { x: 50, y: 34, size: 7 }, name: { x: 50, y: 68, size: 7.5 } } });
   });
 });
 
@@ -612,7 +618,7 @@ describe('打印站与备份', () => {
     assert.equal(created.data.station_online, true);
     const got = await waiting;
     assert.equal(got.data.order.id, created.data.id);
-    assert.equal(got.data.settings.label.width, 50);
+    assert.equal(got.data.settings.label.width, 30);
     // 只返回标签需要的字段
     assert.equal(got.data.order.cancel_reason, undefined);
     assert.equal(got.data.order.created_by_name, undefined);

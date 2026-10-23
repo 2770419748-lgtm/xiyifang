@@ -1,7 +1,6 @@
 // 打印弹窗：开单成功后、取货页补打、订单详情里打印时使用
-// 全部打印：每件一张一次打完；打印单张：点一下打一张；整单汇总：一单一张（小票纸为取件小票）
+// 全部打印：每件一张一次打完；打印单张：点一下打一张；整单：一单只打一张
 import { getPrintMethod, pieceList, printJob } from '../print.js';
-import { store } from '../store.js';
 import { toast, toastError } from '../ui.js';
 
 const { computed, nextTick, reactive, ref, watch } = Vue;
@@ -24,7 +23,6 @@ export const PrintDialogHost = {
     const pieces = computed(() => (order.value ? pieceList(order.value) : []));
     // 本机设置为“开单后不弹出打印”时，手动打印按本机打印
     const method = computed(() => (getPrintMethod() === 'station' ? 'station' : 'local'));
-    const receipt = computed(() => !store.settings.label.height);
     const nextPiece = computed(() => pieces.value.find((p) => !state.counts[p.index]));
     const printedCount = computed(() => pieces.value.filter((p) => state.counts[p.index]).length);
 
@@ -72,7 +70,7 @@ export const PrintDialogHost = {
       allBtn.value?.focus();
     });
 
-    return { state, order, pieces, method, receipt, nextPiece, printedCount, busy, allBtn, close, printAll, printOne, printWhole };
+    return { state, order, pieces, method, nextPiece, printedCount, busy, allBtn, close, printAll, printOne, printWhole };
   },
   template: `
   <Modal v-if="order" :title="state.title || ('打印标签 · ' + order.order_no)" width="560px" @close="close">
@@ -107,7 +105,7 @@ export const PrintDialogHost = {
       </template>
 
       <button type="button" class="link small pd-whole" :disabled="busy" @click="printWhole">
-        {{ receipt ? '打印取件小票（整单一张）' : '打印整单汇总标签（一单一张）' }}
+        整单只打一张标签
       </button>
     </div>
     <template #footer>

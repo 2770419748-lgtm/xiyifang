@@ -12,21 +12,15 @@ export const DEFAULT_SETTINGS = {
   // 包期会员每周额度：[{ category_ids: [品类id…], limit: 数量 }]，同一项里的品类合并计算；
   // 未设置时默认衣物 + 浴巾合计 9 件、鞋子 1 双（见 defaultPackageQuotas）
   package_quotas: null,
+  // 标签：水洗唛布带，只打编号和姓名
   label: {
-    width: 50, // 毫米
-    height: 30, // 毫米；0 表示小票（高度随内容）
-    padding: 1.5,
-    copies: 1, // 全部打印、整单标签时每张打印几份
-    font_scale: 1,
-    // 标签样式：standard 标准（姓名、编码、件数、单号等）/ simple 简洁（只打编码和姓名，适合水洗唛布带）
-    style: 'standard',
-    // 每张末尾打一条裁切虚线（连续布带用，沿虚线剪开）
-    cut_line: false,
-    show_shop: true,
-    show_time: true,
-    show_items: true,
-    show_note: false,
-    show_order_no: true,
+    width: 30, // 布带宽度（毫米）
+    height: 40, // 每张长度（毫米），大于布带宽度时打印内容自动转 90°
+    copies: 1, // 全部打印、整单时每张打印几份
+    cut_line: true, // 每张末尾打一条裁切虚线（整卷布带不分段，沿虚线剪开）
+    // 编号、姓名：中心点位置（占标签宽、高的百分比，按剪下后横着看的方向）和字号（毫米）
+    code: { x: 50, y: 34, size: 7 },
+    name: { x: 50, y: 68, size: 7.5 },
   },
 };
 
@@ -46,7 +40,7 @@ export function getSettings() {
     cache = {
       ...DEFAULT_SETTINGS,
       ...stored,
-      label: { ...DEFAULT_SETTINGS.label, ...(stored.label || {}) },
+      label: readLabel(stored.label),
     };
     if (!cache.package_quotas) cache.package_quotas = defaultPackageQuotas();
   }
@@ -78,6 +72,22 @@ function validatePackageQuotas(input) {
   });
 }
 
+// 标签设置：v1.7 及以前有多种纸张规格，升级后只保留当时选的布带尺寸（和份数），其余用默认值
+function readLabel(stored) {
+  const d = DEFAULT_SETTINGS.label;
+  const label = { ...d, code: { ...d.code }, name: { ...d.name } };
+  if (!stored || typeof stored !== 'object') return label;
+  if (Number.isInteger(stored.copies)) label.copies = stored.copies;
+  if (stored.code) {
+    for (const key of ['width', 'height', 'cut_line']) if (stored[key] !== undefined) label[key] = stored[key];
+    Object.assign(label.code, stored.code);
+    Object.assign(label.name, stored.name);
+  } else if (stored.style === 'simple' && stored.height > 0) {
+    Object.assign(label, { width: stored.width, height: stored.height, cut_line: stored.cut_line !== false });
+  }
+  return label;
+}
+
 function num(value, { label, min, max }) {
   const n = Number(value);
   if (!Number.isFinite(n) || n < min || n > max) throw new HttpError(400, `${label}应在 ${min}~${max} 之间`);
@@ -85,21 +95,18 @@ function num(value, { label, min, max }) {
 }
 
 function validateLabel(input, current) {
-  const label = { ...current };
-  if (input.width !== undefined) label.width = num(input.width, { label: '标签宽度', min: 20, max: 120 });
-  if (input.height !== undefined) {
-    label.height = Number(input.height) === 0 ? 0 : num(input.height, { label: '标签高度', min: 10, max: 200 });
-  }
-  if (input.padding !== undefined) label.padding = num(input.padding, { label: '边距', min: 0, max: 10 });
-  if (input.font_scale !== undefined) label.font_scale = num(input.font_scale, { label: '字体缩放', min: 0.6, max: 2 });
+  const label = { ...current, code: { ...current.code }, name: { ...current.name } };
+  if (input.width !== undefined) label.width = num(input.width, { label: '布带宽度', min: 10, max: 110 });
+  if (input.height !== undefined) label.height = num(input.height, { label: '每张长度', min: 10, max: 200 });
   if (input.copies !== undefined) label.copies = int(input.copies, { label: '打印份数', min: 1, max: 10 });
-  if (input.style !== undefined) {
-    if (!['standard', 'simple'].includes(input.style)) throw new HttpError(400, '标签样式不正确');
-    label.style = input.style;
-  }
   if (input.cut_line !== undefined) label.cut_line = bool(input.cut_line);
-  for (const key of ['show_shop', 'show_time', 'show_items', 'show_note', 'show_order_no']) {
-    if (input[key] !== undefined) label[key] = bool(input[key]);
+  for (const [key, name] of [['code', '编号'], ['name', '姓名']]) {
+    const p = input[key];
+    if (p === undefined) continue;
+    if (typeof p !== 'object' || p === null) throw new HttpError(400, `${name}的位置设置不正确`);
+    if (p.x !== undefined) label[key].x = num(p.x, { label: `${name}的位置`, min: 0, max: 100 });
+    if (p.y !== undefined) label[key].y = num(p.y, { label: `${name}的位置`, min: 0, max: 100 });
+    if (p.size !== undefined) label[key].size = num(p.size, { label: `${name}的字号`, min: 2, max: 30 });
   }
   return label;
 }

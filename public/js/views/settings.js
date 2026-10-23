@@ -1,29 +1,19 @@
 import { api } from '../api.js';
 import { quotaUnit } from '../components/member.js';
-import { buildPages, fitText, isTurned, printPages, sampleOrder } from '../print.js';
+import { buildPages, fitText, isTurned, printPages, sampleOrder, tagSize } from '../print.js';
 import { store } from '../store.js';
 import { toast, toastError } from '../ui.js';
 
-const { computed, nextTick, reactive, ref, watch } = Vue;
+const { computed, nextTick, onBeforeUnmount, onMounted, reactive, ref, watch } = Vue;
 
-const PAPERS = [
-  { key: '40x30', label: '不干胶标签 40×30mm', width: 40, height: 30 },
-  { key: '50x30', label: '不干胶标签 50×30mm', width: 50, height: 30 },
-  { key: '60x40', label: '不干胶标签 60×40mm', width: 60, height: 40 },
-  { key: '70x50', label: '不干胶标签 70×50mm', width: 70, height: 50 },
-  { key: 'r58', label: '热敏小票 58mm', width: 58, height: 0 },
-  { key: 'r80', label: '热敏小票 80mm', width: 80, height: 0 },
-  // 水洗唛布带：宽度固定，每张长度可改；选中时默认简洁样式、打裁切线
-  { key: 'tape30', label: '水洗唛布带 30mm 宽', width: 30, height: 40, tape: true },
+// 编号、姓名的默认位置和字号（与服务器默认值一致）
+const DEFAULT_TAG = { code: { x: 50, y: 34, size: 7 }, name: { x: 50, y: 68, size: 7.5 } };
+const TAG_ITEMS = [
+  { key: 'code', label: '编号' },
+  { key: 'name', label: '姓名' },
 ];
-
-const FIELDS = [
-  { key: 'show_shop', label: '店铺名称' },
-  { key: 'show_time', label: '送来时间' },
-  { key: 'show_items', label: '物品明细' },
-  { key: 'show_order_no', label: '单号和件数' },
-  { key: 'show_note', label: '备注' },
-];
+const clamp = (v, min, max) => Math.min(max, Math.max(min, v));
+const round1 = (v) => Math.round(v * 10) / 10;
 
 const clone = (o) => JSON.parse(JSON.stringify(o));
 
@@ -43,39 +33,87 @@ export default {
     const unitOfQuota = (g) => quotaUnit(store.categories.filter((c) => g.category_ids.includes(c.id)));
     const addQuota = () => s.package_quotas.push({ category_ids: [], limit: 1 });
     const removeQuota = (i) => s.package_quotas.splice(i, 1);
-    const previewEl = ref(null);
-    const findPaper = () =>
-      PAPERS.find((p) => p.width === s.label.width && (p.tape ? s.label.height > 0 : p.height === s.label.height))?.key ||
-      'custom';
-    const paperSel = ref(findPaper());
-    const isTape = computed(() => !!PAPERS.find((p) => p.key === paperSel.value)?.tape);
 
-    function onPaper() {
-      const p = PAPERS.find((x) => x.key === paperSel.value);
-      if (p) Object.assign(s.label, { width: p.width, height: p.height });
-      if (p?.tape) Object.assign(s.label, { style: 'simple', cut_line: true });
-      else if (p) s.label.cut_line = false;
+    // 布带标签编辑：编号、姓名可拖动调整位置（按剪下后横着看的方向），字号分开调
+    const sample = sampleOrder();
+    const textOf = (key) => (key === 'code' ? sample.customer_code : sample.customer_name);
+    const tagEl = ref(null);
+    const wrapEl = ref(null);
+    const wrapW = ref(400);
+    const selected = ref('code');
+    const dragging = ref(null);
+    const turned = computed(() => isTurned(s.label));
+    const size = computed(() => tagSize(s.label));
+    // 编辑区每毫米多少像素：按编辑区宽度放大显示
+    const k = computed(() => Math.min(14, Math.min(wrapW.value, 460) / Math.max(size.value.w, 1), 340 / Math.max(size.value.h, 1)));
+
+    let ro = null;
+    onMounted(() => {
+      ro = new ResizeObserver(([e]) => (wrapW.value = e.contentRect.width));
+      if (wrapEl.value) ro.observe(wrapEl.value);
+    });
+    onBeforeUnmount(() => ro?.disconnect());
+
+    // 与打印时相同：中心点在 (x%, y%)，最大宽度按离左右两边的距离算
+    function itemStyle(key) {
+      const p = s.label[key];
+      const room = 2 * Math.min(p.x, 100 - p.x);
+      return { left: `${p.x}%`, top: `${p.y}%`, fontSize: `${p.size * k.value}px`, maxWidth: `calc(${room}% - ${k.value}px)` };
     }
 
-    const isReceipt = computed(() => !Number(s.label.height));
-    const turned = computed(() => isTurned(s.label));
-    // 预览：单件标签（全部打印、打印单张用）或整单标签（小票纸为取件小票）
-    const previewKind = ref('piece');
-    const previewJob = computed(() => (previewKind.value === 'piece' ? { kind: 'piece', piece: 1 } : { kind: 'order' }));
-    // 转 90° 打印的标签（竖着走纸的布带）预览时按剪下后横着看的样子显示
-    const previewHTML = computed(() => buildPages(sampleOrder(), s, previewJob.value, { upright: true })[0]);
-    const previewZoom = computed(() =>
-      isReceipt.value ? 1.2 : Math.min(3, 300 / ((turned.value ? s.label.height : s.label.width) * 3.78)),
-    );
-
+    // 过长的编号、姓名和打印时一样自动缩小
     watch(
-      previewHTML,
+      [() => s.label, k],
       async () => {
         await nextTick();
-        if (previewEl.value) fitText(previewEl.value);
+        if (!tagEl.value) return;
+        for (const el of tagEl.value.querySelectorAll('.tg-item')) el.style.fontSize = `${s.label[el.dataset.key].size * k.value}px`;
+        fitText(tagEl.value);
       },
-      { immediate: true, flush: 'post' },
+      { deep: true, immediate: true, flush: 'post' },
     );
+
+    // 拖动：记下按下时指针和中心点的偏移，移动时保持不变；拖到水平中线附近自动居中
+    let drag = null;
+    function startDrag(key, e) {
+      selected.value = key;
+      e.currentTarget.focus();
+      e.currentTarget.setPointerCapture?.(e.pointerId);
+      const rect = tagEl.value.getBoundingClientRect();
+      const p = s.label[key];
+      drag = { key, rect, dx: e.clientX - rect.left - (p.x / 100) * rect.width, dy: e.clientY - rect.top - (p.y / 100) * rect.height };
+      dragging.value = key;
+    }
+    function onDrag(e) {
+      if (!drag) return;
+      const { key, rect, dx, dy } = drag;
+      const x = ((e.clientX - rect.left - dx) / rect.width) * 100;
+      const y = ((e.clientY - rect.top - dy) / rect.height) * 100;
+      s.label[key].x = round1(clamp(Math.abs(x - 50) < 2 ? 50 : x, 0, 100));
+      s.label[key].y = round1(clamp(y, 0, 100));
+    }
+    function endDrag() {
+      drag = null;
+      dragging.value = null;
+    }
+    const showGuide = computed(() => dragging.value && s.label[dragging.value].x === 50);
+
+    // 选中后用方向键微调，按住 Shift 移动更多
+    function nudge(key, e) {
+      const step = e.shiftKey ? 5 : 0.5;
+      const d = { ArrowLeft: [-step, 0], ArrowRight: [step, 0], ArrowUp: [0, -step], ArrowDown: [0, step] }[e.key];
+      if (!d) return;
+      e.preventDefault();
+      const p = s.label[key];
+      p.x = round1(clamp(p.x + d[0], 0, 100));
+      p.y = round1(clamp(p.y + d[1], 0, 100));
+    }
+
+    function centerAll() {
+      s.label.code.x = 50;
+      s.label.name.x = 50;
+    }
+    const resetTag = () => Object.assign(s.label, clone(DEFAULT_TAG));
 
     async function save() {
       saving.value = true;
@@ -84,7 +122,6 @@ export default {
         store.settings = r;
         store.shopName = r.shop_name;
         Object.assign(s, clone(r));
-        paperSel.value = findPaper();
         toast('设置已保存', 'success');
       } catch (e) {
         toastError(e);
@@ -93,31 +130,37 @@ export default {
       }
     }
 
-    // 测试打印当前预览的那一张
+    // 按当前设置（未保存也可以）打印一张测试
     function testPrint() {
-      printPages(buildPages(sampleOrder(), s, previewJob.value).slice(0, 1), s);
+      printPages(buildPages(sample, s, { kind: 'piece', piece: 1 }), s);
     }
 
     return {
       s,
       saving,
-      previewEl,
-      paperSel,
-      isTape,
-      turned,
-      PAPERS,
-      FIELDS,
       store,
       ownerOf,
       toggleCat,
       unitOfQuota,
       addQuota,
       removeQuota,
-      isReceipt,
-      previewKind,
-      previewHTML,
-      previewZoom,
-      onPaper,
+      TAG_ITEMS,
+      textOf,
+      tagEl,
+      wrapEl,
+      selected,
+      dragging,
+      turned,
+      size,
+      k,
+      itemStyle,
+      startDrag,
+      onDrag,
+      endDrag,
+      showGuide,
+      nudge,
+      centerAll,
+      resetTag,
       save,
       testPrint,
       backupHref: api.href('/settings/backup'),
@@ -178,66 +221,40 @@ export default {
     </section>
 
     <section class="card">
-      <div class="card-head"><h3>标签打印</h3></div>
+      <div class="card-head"><h3>标签打印（水洗唛布带）</h3></div>
       <div class="two-col">
         <div class="form-stack">
-          <label class="field">
-            <span>纸张</span>
-            <select v-model="paperSel" @change="onPaper">
-              <option v-for="p in PAPERS" :key="p.key" :value="p.key">{{ p.label }}</option>
-              <option value="custom">自定义尺寸</option>
-            </select>
-          </label>
-          <div class="customer-inputs" v-if="paperSel === 'custom'">
-            <label class="field"><span>宽度（毫米）</span><input v-model.number="s.label.width" type="number" min="20" max="120"></label>
-            <label class="field"><span>高度（毫米，0 = 小票）</span><input v-model.number="s.label.height" type="number" min="0" max="200"></label>
-          </div>
-          <label class="field" v-if="isTape">
-            <span>每张长度（毫米） <span class="hint">剪下来一张标签的长度</span></span>
-            <input v-model.number="s.label.height" type="number" min="10" max="200">
-          </label>
           <div class="customer-inputs">
-            <label class="field"><span>每张打印份数 <span class="hint">全部打印、整单时</span></span><input v-model.number="s.label.copies" type="number" min="1" max="10"></label>
-            <label class="field">
-              <span>字体大小</span>
-              <select v-model.number="s.label.font_scale">
-                <option :value="0.8">小</option>
-                <option :value="0.9">较小</option>
-                <option :value="1">标准</option>
-                <option :value="1.15">较大</option>
-                <option :value="1.3">大</option>
-              </select>
-            </label>
+            <label class="field"><span>布带宽度（毫米）</span><input v-model.number="s.label.width" type="number" min="10" max="110"></label>
+            <label class="field"><span>每张长度（毫米）</span><input v-model.number="s.label.height" type="number" min="10" max="200"></label>
           </div>
-          <label class="field"><span>页边距（毫米）</span><input v-model.number="s.label.padding" type="number" min="0" max="10" step="0.5"></label>
-          <label class="field">
-            <span>标签样式</span>
-            <select v-model="s.label.style">
-              <option value="standard">标准（姓名、编码、件数、单号等）</option>
-              <option value="simple">简洁（只打编码和姓名，适合水洗唛）</option>
-            </select>
-          </label>
-          <div class="field" v-if="s.label.style !== 'simple'">
-            <span>打印内容 <span class="hint">姓名和编码始终打印</span></span>
-            <div class="row wrap" style="gap:14px">
-              <label v-for="f in FIELDS" :key="f.key" class="check"><input type="checkbox" v-model="s.label[f.key]">{{ f.label }}</label>
-            </div>
+          <div v-for="it in TAG_ITEMS" :key="it.key" class="size-row">
+            <div class="size-head"><span>{{ it.label }}字号</span><b>{{ s.label[it.key].size }} 毫米</b></div>
+            <input type="range" min="3" max="20" step="0.5" v-model.number="s.label[it.key].size" :aria-label="it.label + '字号'">
           </div>
-          <label class="check" v-if="!isReceipt">
-            <input type="checkbox" v-model="s.label.cut_line">每张末尾打一条裁切虚线（整卷布带不分段时用，沿虚线剪开）
-          </label>
+          <label class="field"><span>每张打印份数 <span class="hint">全部打印、整单时</span></span><input v-model.number="s.label.copies" type="number" min="1" max="10"></label>
+          <label class="check"><input type="checkbox" v-model="s.label.cut_line">每张末尾打一条裁切虚线（整卷布带不分段时用，沿虚线剪开）</label>
+          <p class="muted small" style="margin:0">打印机驱动的“打印首选项”里：纸张设成宽 {{ s.label.width }}mm × 高 {{ s.label.height }}mm，介质类型选“连续”，打印方式选“热转印”。</p>
         </div>
         <div class="form-stack">
-          <div class="seg" style="align-self:flex-start">
-            <button type="button" :class="{ active: previewKind === 'piece' }" @click="previewKind = 'piece'">单件标签</button>
-            <button type="button" :class="{ active: previewKind === 'order' }" @click="previewKind = 'order'">{{ isReceipt ? '整单取件小票' : '整单汇总标签' }}</button>
+          <div ref="wrapEl" class="tag-editor-wrap">
+            <div ref="tagEl" class="tag-editor" :class="{ 'cut-end': s.label.cut_line && turned, 'cut-bottom': s.label.cut_line && !turned }"
+              :style="{ width: size.w * k + 'px', height: size.h * k + 'px' }" @pointermove="onDrag" @pointerup="endDrag" @pointercancel="endDrag">
+              <div v-if="showGuide" class="tag-guide"></div>
+              <div v-for="it in TAG_ITEMS" :key="it.key" class="tg-item fit" :data-key="it.key" tabindex="0"
+                :class="{ sel: selected === it.key, dragging: dragging === it.key }" :style="itemStyle(it.key)" :title="'拖动调整' + it.label + '的位置'"
+                @pointerdown.prevent="startDrag(it.key, $event)" @focus="selected = it.key" @keydown="nudge(it.key, $event)">{{ textOf(it.key) }}</div>
+            </div>
           </div>
-          <div class="label-preview-wrap">
-            <div ref="previewEl" class="label-preview" :style="{ zoom: previewZoom }" v-html="previewHTML"></div>
+          <p class="muted small" style="margin:0">
+            用鼠标或手指拖动编号、姓名调整打印位置；点一下选中后也可以用方向键微调（按住 Shift 移动更多）。<template v-if="turned">布带竖着走纸，打印时文字会自动转 90°，这里显示的是剪下后横着看的样子。</template>
+          </p>
+          <div class="btn-row">
+            <button type="button" class="btn" @click="centerAll">水平居中</button>
+            <button type="button" class="btn" @click="resetTag">恢复默认位置</button>
+            <button type="button" class="btn" @click="testPrint"><Icon name="printer" :size="16"/>打印一张测试</button>
           </div>
-          <button type="button" class="btn" @click="testPrint"><Icon name="printer" :size="16"/>按当前设置打印一张测试</button>
-          <p v-if="turned" class="notice info small" style="margin:0">布带竖着走纸，打印时文字会自动转 90°，沿布带方向排列；上面的预览是剪下后横着看的样子。</p>
-          <p class="muted small" style="margin:0">开单后的“全部打印”“打印单张”使用单件标签（每件衣物一张）；整单标签可在打印窗口中选择。预览为放大显示，测试满意后记得点击下方“保存设置”。</p>
+          <p class="muted small" style="margin:0">调整满意后记得点击下方“保存设置”。</p>
         </div>
       </div>
     </section>

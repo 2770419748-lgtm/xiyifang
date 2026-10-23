@@ -1,9 +1,8 @@
-// 标签/小票打印：生成打印内容 → 按设置的纸张尺寸调用浏览器打印
-// 打印机只要在电脑上装好驱动即可；Chrome 加 --kiosk-printing 启动可不弹对话框直接出纸
+// 标签打印（水洗唛布带）：生成打印内容 → 按布带宽度和每张长度调用浏览器打印
+// 打印机只要在电脑上装好驱动即可；Chrome / Edge 加 --kiosk-printing 启动可不弹对话框直接出纸
 import { api } from './api.js';
 import { store } from './store.js';
 import { confirm, toast } from './ui.js';
-import { itemsText, money } from './utils.js';
 
 const METHOD_KEY = 'laundry.printMethod';
 
@@ -34,101 +33,28 @@ export function setPrintMethod(value) {
 const esc = (s) =>
   String(s ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[c]);
 
-const round2 = (n) => Math.round(n * 100) / 100;
+// 布带竖着走纸：每张长度大于布带宽度时，打印时内容整体转 90°，沿布带方向排列
+export const isTurned = (L) => L.height > L.width;
+// 剪下后横着看的宽和高（毫米），编号、姓名的位置按这个方向设置
+export const tagSize = (L) => (isTurned(L) ? { w: L.height, h: L.width } : { w: L.width, h: L.height });
 
-// 字号随纸张大小缩放（以 50×30mm 标签 / 58mm 小票为基准）；w、h 为文字方向上的宽和高
-function scaleOf(w, h, L) {
-  return round2((h ? Math.min(w / 50, h / 30) : w / 58) * L.font_scale);
+// 编号、姓名：中心点在 (x%, y%)；最大宽度按离左右两边的距离算，过长时自动缩小
+function itemHTML(cls, text, p) {
+  const room = 2 * Math.min(p.x, 100 - p.x);
+  return `<div class="tg-item ${cls} fit" style="left:${p.x}%;top:${p.y}%;font-size:${p.size}mm;max-width:calc(${room}% - 1mm)">${esc(text)}</div>`;
 }
 
-// 高大于宽的标签（如竖着走纸的水洗唛布带）打印时内容整体转 90°，沿长边排列
-export const isTurned = (L) => L.height > L.width;
-
-/**
- * 一张标签（打印时为一页）
- * upright：设置页预览时不旋转，显示剪下后横着看的样子
- */
-function box(L, inner, extraClass = '', upright = false) {
-  // 小票纸（高度 0）：高度随内容
-  if (!L.height) {
-    return `<div class="label auto${extraClass}" style="width:${L.width}mm;padding:${L.padding}mm;--s:${scaleOf(L.width, 0, L)}">${inner}</div>`;
-  }
+// 一张布带标签（打印时为一页）：只打编号和姓名，每件衣物的标签都一样
+function tagHTML(order, L) {
+  const inner = itemHTML('tg-code', order.customer_code, L.code) + itemHTML('tg-name', order.customer_name, L.name);
   const h = L.height - 0.3; // 略小于纸张，避免四舍五入误差导致多出空白页
-  const turn = isTurned(L);
-  const [w2, h2] = turn ? [h, L.width] : [L.width, h]; // 文字方向上的宽和高
-  // --t：简洁样式的字号，约为标签高度的四分之一
-  const vars = `padding:${L.padding}mm;--s:${scaleOf(w2, h2, L)};--t:${round2(h2 * 0.24 * L.font_scale)}mm`;
-  // 裁切线打在每张末尾（走纸方向的下边）；转 90° 的标签横着看时在右边
-  const cut = L.cut_line ? (turn ? ' cut-end' : ' cut') : '';
-  if (!turn || upright) {
-    return `<div class="label${extraClass}${cut}" style="width:${w2}mm;height:${h2}mm;${vars}">${inner}</div>`;
-  }
+  const cut = L.cut_line ? ' cut' : ''; // 裁切线打在每张末尾（走纸方向的下边）
+  if (!isTurned(L)) return `<div class="label tape${cut}" style="width:${L.width}mm;height:${h}mm">${inner}</div>`;
   return (
-    `<div class="label rotated${L.cut_line ? ' cut' : ''}" style="width:${L.width}mm;height:${h}mm">` +
-    `<div class="lb-turn${extraClass}" style="width:${h}mm;height:${L.width}mm;${vars};transform:translateX(${L.width}mm) rotate(90deg)">${inner}</div>` +
+    `<div class="label rotated${cut}" style="width:${L.width}mm;height:${h}mm">` +
+    `<div class="tape lb-turn" style="width:${h}mm;height:${L.width}mm;transform:translateX(${L.width}mm) rotate(90deg)">${inner}</div>` +
     '</div>'
   );
-}
-
-// 不干胶标签：传 piece 为单件标签（衣物 1/3），不传为整单汇总标签
-function stickerHTML(order, settings, piece, upright) {
-  const L = settings.label;
-  // 简洁样式：只打编码和姓名（编码在上）
-  if (L.style === 'simple') {
-    const inner = `<div class="lb-code fit">${esc(order.customer_code)}</div><div class="lb-name fit">${esc(order.customer_name)}</div>`;
-    return box(L, inner, ' simple', upright);
-  }
-  const parts = [];
-  if (L.show_shop || L.show_time) {
-    parts.push(
-      `<div class="lb-row lb-small"><span>${L.show_shop ? esc(settings.shop_name) : ''}</span><span>${
-        L.show_time ? esc(order.received_at.slice(5, 16)) : ''
-      }</span></div>`,
-    );
-  }
-  parts.push(`<div class="lb-name fit">${esc(order.customer_name)}</div>`);
-  parts.push(`<div class="lb-code fit">${esc(order.customer_code)}</div>`);
-  if (piece) {
-    parts.push(
-      `<div class="lb-row lb-mid"><span>${esc(piece.name)} ${piece.k}/${piece.qty}</span><span>第${piece.index}/${order.total_qty}件</span></div>`,
-    );
-  } else if (L.show_items) {
-    parts.push(`<div class="lb-items">${esc(itemsText(order.items))}</div>`);
-  }
-  if (L.show_note && order.note) parts.push(`<div class="lb-note">备注:${esc(order.note)}</div>`);
-  if (L.show_order_no) {
-    parts.push(`<div class="lb-row lb-small"><span>${esc(order.order_no)}</span><span>共${order.total_qty}件</span></div>`);
-  }
-  return box(L, parts.join(''), '', upright);
-}
-
-// 小票纸上的整单取件小票
-function receiptHTML(order, settings) {
-  const L = settings.label;
-  const priced = settings.enable_price;
-  const items = order.items
-    .map(
-      (i) =>
-        `<div class="rc-line"><span>${esc(i.category_name)} × ${i.quantity}</span>${
-          priced && i.unit_price ? `<span>${money(i.unit_price * i.quantity)}</span>` : ''
-        }</div>`,
-    )
-    .join('');
-  const inner = [
-    L.show_shop ? `<div class="rc-center rc-shop">${esc(settings.shop_name)}</div><div class="rc-hr"></div>` : '',
-    `<div class="lb-name fit">${esc(order.customer_name)}</div>`,
-    `<div class="lb-code fit">${esc(order.customer_code)}</div>`,
-    `<div class="rc-line"><span>单号</span><span>${esc(order.order_no)}</span></div>`,
-    L.show_time ? `<div class="rc-line"><span>送来时间</span><span>${esc(order.received_at.slice(0, 16))}</span></div>` : '',
-    '<div class="rc-hr"></div>',
-    items,
-    '<div class="rc-hr"></div>',
-    `<div class="rc-line"><b>共 ${order.total_qty} 件</b>${priced ? `<b>${money(order.amount)}</b>` : ''}</div>`,
-    L.show_note && order.note ? `<div class="lb-note">备注：${esc(order.note)}</div>` : '',
-    '<div class="rc-hr"></div>',
-    '<div class="rc-center lb-small">请凭编码取件，谢谢惠顾</div>',
-  ];
-  return box(L, inner.join(''), ' receipt');
 }
 
 // 一个订单每件一张标签的清单：[{ index: 第几件(从1开始), name, k, qty }]
@@ -142,24 +68,18 @@ export function pieceList(order) {
 
 /**
  * 生成要打印的页面（每页一张标签）
- * job.kind：all 全部（每件一张）/ piece 单张（job.piece 为第几件）/ order 整单一张（小票纸为取件小票）
+ * job.kind：all 全部（每件一张）/ piece 单张（job.piece 为第几件）/ order 整单一张
  * “全部”和“整单”按设置的份数重复，单张只打一张
- * upright：设置页预览用，转 90° 的标签按横着看的样子显示
  */
-export function buildPages(order, settings, job = { kind: 'all' }, { upright = false } = {}) {
+export function buildPages(order, settings, job = { kind: 'all' }) {
   const L = settings.label;
-  const copies = Math.max(1, L.copies || 1);
-  const repeat = (pages) => pages.flatMap((p) => Array(copies).fill(p));
-  if (job.kind === 'order') return repeat([L.height ? stickerHTML(order, settings, null, upright) : receiptHTML(order, settings)]);
-  const pieces = pieceList(order);
-  if (job.kind === 'piece') {
-    const p = pieces[(job.piece || 1) - 1];
-    return p ? [stickerHTML(order, settings, p, upright)] : [];
-  }
-  return repeat(pieces.map((p) => stickerHTML(order, settings, p, upright)));
+  const tag = tagHTML(order, L);
+  if (job.kind === 'piece') return pieceList(order)[(job.piece || 1) - 1] ? [tag] : [];
+  const n = job.kind === 'order' ? 1 : pieceList(order).length;
+  return Array(n * Math.max(1, L.copies || 1)).fill(tag);
 }
 
-// 姓名、编码太长时自动缩小字号，保证打印完整
+// 编号、姓名太长时自动缩小字号，保证打印完整
 export function fitText(root) {
   for (const el of root.querySelectorAll('.fit')) {
     let size = Number.parseFloat(getComputedStyle(el).fontSize);
@@ -185,15 +105,9 @@ export function printPages(pages, settings) {
   const root = document.getElementById('print-root');
   root.innerHTML = pages.join('');
   fitText(root);
-  let height = L.height;
-  if (!height) {
-    // 小票纸：按最高的一张确定纸张高度
-    const px = Math.max(...[...root.children].map((el) => el.getBoundingClientRect().height));
-    height = Math.ceil((px * 25.4) / 96) + 2;
-  }
   cleanup();
   pageStyle = document.createElement('style');
-  pageStyle.textContent = `@page { size: ${L.width}mm ${height}mm; margin: 0; }`;
+  pageStyle.textContent = `@page { size: ${L.width}mm ${L.height}mm; margin: 0; }`;
   document.head.appendChild(pageStyle);
   document.body.classList.add('printing-labels');
   clearTimeout(cleanupTimer);
@@ -223,7 +137,7 @@ export function sampleOrder() {
   return {
     id: 0,
     order_no: `${String(d.getFullYear()).slice(2)}${pad(d.getMonth() + 1)}${pad(d.getDate())}-001`,
-    customer_name: '张三',
+    customer_name: '张小明',
     customer_code: '1234',
     total_qty: 3,
     amount: 4500,

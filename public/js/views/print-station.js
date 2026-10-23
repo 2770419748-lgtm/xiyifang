@@ -38,7 +38,7 @@ export default {
 
     const paper = computed(() => {
       const l = store.settings.label;
-      return l.height ? `${l.width}×${l.height}mm 标签` : `${l.width}mm 小票`;
+      return `${l.width}mm 宽布带，每张 ${l.height}mm`;
     });
 
     return { station, paper, start, stopStation, clearQueue, testPrint, itemsText, isManager };
