@@ -18,5 +18,7 @@ if not exist node_modules (
   echo Installing dependencies, please wait...
   call npm install --registry=https://registry.npmmirror.com
 )
+rem Open the browser window for direct printing (no print preview) once the system is up
+set OPEN_BROWSER=1
 call npm start
 pause

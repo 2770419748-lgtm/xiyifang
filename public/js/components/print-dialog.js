@@ -1,6 +1,6 @@
 // 打印弹窗：开单成功后、取货页补打、订单详情里打印时使用
 // 全部打印：每件一张一次打完；打印单张：点一下打一张；整单：一单只打一张
-import { getPrintMethod, pieceList, printJob } from '../print.js';
+import { getPrintMethod, isDirectPrint, pieceList, printJob } from '../print.js';
 import { toast, toastError } from '../ui.js';
 
 const { computed, nextTick, reactive, ref, watch } = Vue;
@@ -70,7 +70,9 @@ export const PrintDialogHost = {
       allBtn.value?.focus();
     });
 
-    return { state, order, pieces, method, nextPiece, printedCount, busy, allBtn, close, printAll, printOne, printWhole };
+    // 普通浏览器窗口打印会弹出预览，提示用 start.bat 打开的“直接打印”窗口
+    const previewHint = computed(() => method.value === 'local' && !isDirectPrint());
+    return { state, order, pieces, method, previewHint, nextPiece, printedCount, busy, allBtn, close, printAll, printOne, printWhole };
   },
   template: `
   <Modal v-if="order" :title="state.title || ('打印标签 · ' + order.order_no)" width="560px" @close="close">
@@ -82,6 +84,10 @@ export const PrintDialogHost = {
         <span class="spacer"></span>
         <span class="tag plain" :class="method === 'station' ? 'info' : ''">{{ method === 'station' ? '由打印站打印' : '本机打印' }}</span>
       </div>
+
+      <p v-if="previewHint" class="muted small" style="margin:0">
+        这个窗口点打印后会弹出浏览器的打印预览。想直接出标签，请在 start.bat 启动后自动打开的窗口（标题带“直接打印”）里打印。
+      </p>
 
       <button ref="allBtn" type="button" class="btn primary lg block" :disabled="busy" @click="printAll">
         <Icon name="printer" :size="18"/>{{ pieces.length > 1 ? '全部打印（' + pieces.length + ' 张）' : '打印标签' }}

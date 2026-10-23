@@ -30,6 +30,28 @@ export function setPrintMethod(value) {
   }
 }
 
+// “直接打印”窗口：start.bat / open-direct-print.bat 用 --kiosk-printing 打开，地址带 ?direct=1，
+// 打印不弹预览。这个窗口用单独的浏览器配置，记在它自己的本地存储里
+const DIRECT_KEY = 'laundry.directPrint';
+
+export function markDirectPrint() {
+  if (!new URLSearchParams(location.search).has('direct')) return;
+  try {
+    localStorage.setItem(DIRECT_KEY, '1');
+  } catch {
+    // 忽略
+  }
+  history.replaceState(null, '', location.pathname + location.hash);
+}
+
+export function isDirectPrint() {
+  try {
+    return localStorage.getItem(DIRECT_KEY) === '1';
+  } catch {
+    return false;
+  }
+}
+
 const esc = (s) =>
   String(s ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[c]);
 

@@ -3,6 +3,7 @@ import path from 'node:path';
 import express from 'express';
 import { authenticate } from './auth.js';
 import { startMaintenance } from './backup.js';
+import { openBrowser } from './browser.js';
 import { config } from './config.js';
 import { db } from './db.js';
 import authRoutes from './routes/auth.js';
@@ -67,6 +68,12 @@ const server = app.listen(config.port, config.host, () => {
   console.log('洗衣房管理系统已启动，访问地址：');
   for (const u of urls) console.log(`  ${u}`);
   console.log('手机和电脑连同一个 WiFi，用手机浏览器打开上面的局域网地址（192.168 开头）即可使用。');
+  // start.bat 启动时自动打开“直接打印”的浏览器窗口（打印不弹预览）
+  if (process.env.OPEN_BROWSER === '1' && process.platform === 'win32') {
+    if (openBrowser(`http://localhost:${config.port}/?direct=1`)) {
+      console.log('已打开浏览器窗口（标题带“直接打印”），在这个窗口里打印不弹预览，直接出标签。');
+    }
+  }
 });
 
 server.on('error', (err) => {

@@ -3,6 +3,7 @@ import { BarList, ColumnChart, LineChart } from './components/charts.js';
 import { DialogHost, Icon, Modal, Pager, StatusTag, ToastHost, Toggle } from './components/common.js';
 import { OrderList } from './components/order-list.js';
 import { PrintDialogHost } from './components/print-dialog.js';
+import { isDirectPrint, markDirectPrint } from './print.js';
 import { PackageQuota } from './components/member.js';
 import { CategoryPicker, CustomerPicker } from './components/pickers.js';
 import { resumeStationIfNeeded, station } from './station.js';
@@ -25,6 +26,9 @@ import StatsView from './views/stats.js';
 import UsersView from './views/users.js';
 
 const { computed, createApp, watch } = Vue;
+
+// 记下“直接打印”窗口并去掉地址里的 ?direct=1（要在创建路由之前，哈希路由会把当前查询参数当作基础地址）
+markDirectPrint();
 const { createRouter, createWebHashHistory, useRoute, useRouter } = VueRouter;
 
 // meta.manager：仅店长可访问；meta.nav / meta.tab：菜单高亮项；meta.back：显示返回按钮
@@ -68,8 +72,10 @@ router.beforeEach(async (to) => {
   return true;
 });
 
+const titleSuffix = isDirectPrint() ? ' · 直接打印' : '';
+
 router.afterEach((to) => {
-  document.title = `${to.meta.title || ''} - ${store.shopName}`;
+  document.title = `${to.meta.title || ''} - ${store.shopName}${titleSuffix}`;
 });
 
 onUnauthorized(() => {

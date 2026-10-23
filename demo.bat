@@ -22,5 +22,6 @@ echo.
 echo DEMO mode: sample data is stored in the data-demo folder (your real data is not touched).
 echo Manager: admin / admin123    Clerk: xiaoli / 123456
 echo.
+set OPEN_BROWSER=1
 call npm run demo
 pause

@@ -2,9 +2,9 @@
 rem Open the laundry system in "direct print" mode: labels go straight to the
 rem Windows default printer, without the print preview dialog (--kiosk-printing).
 rem A separate browser profile is used, so it works even if Edge/Chrome is already open.
-rem Start the system first (start.bat), then double-click this file.
+rem start.bat already opens this window; use this file to reopen it after closing it.
 setlocal
-set "URL=http://localhost:3000"
+set "URL=http://localhost:3000/?direct=1"
 set "PROFILE=%LOCALAPPDATA%\LaundrySystemBrowser"
 
 set "BROWSER=%ProgramFiles(x86)%\Microsoft\Edge\Application\msedge.exe"
