@@ -56,14 +56,8 @@ export default {
         if (mine !== seq) return;
         orders.value = r.items;
         totalPending.value = r.total_pending;
+        // 不自动勾选：按客户分组列出，由店员勾选要取的订单（也可以点“全选”）
         for (const id of [...selected]) if (!r.items.some((o) => o.id === id)) selected.delete(id);
-        // 输入的正好是某位客户的编码：自动勾选他的全部待取订单
-        // 编码有多位客户共用时不自动勾选，按客户分组列出，由店员选择
-        const k = kw.value.trim();
-        if (CODE_RE.test(k) && !selected.size) {
-          const same = groups.value.filter((x) => x.code === k || x.baseCode === k);
-          if (same.length === 1) same[0].orders.forEach((o) => selected.add(o.id));
-        }
       } catch (e) {
         toastError(e);
       } finally {
