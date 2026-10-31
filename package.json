@@ -1,6 +1,6 @@
 {
   "name": "laundry-system",
-  "version": "1.9.2",
+  "version": "1.9.3",
   "private": true,
   "description": "洗衣房管理系统",
   "type": "module",
