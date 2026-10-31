@@ -98,11 +98,65 @@ npm start
 
 ## 部署到云服务器（可选）
 
-想在店外也能看数据，可以部署到阿里云 / 腾讯云等服务器，步骤相同（`npm install`、`npm start`），并在安全组放行端口。建议：
+放到云服务器上以后，手机、电脑在任何地方打开网址登录就能用，不用和店里电脑连同一个 WiFi。代价是店里要有网：断网就开不了单（可以开手机热点应急）。
 
-- 用 `pm2` 保持后台运行：`npm i -g pm2 && pm2 start npm --name laundry -- start && pm2 save && pm2 startup`
-- 用 nginx 反向代理并配置 HTTPS（国内服务器使用域名需要备案）
-- 打印站照样可用：店里连着打印机的电脑用浏览器登录云端地址并开启打印站即可
+### 1. 服务器上安装
+
+用 root 在服务器终端（宝塔「终端」，或云控制台的「登录 / 远程连接」）粘贴运行：
+
+```bash
+cd /tmp && rm -rf xiyifang-main && curl -fsSL https://codeload.github.com/2770419748-lgtm/xiyifang/tar.gz/refs/heads/main | tar xz \
+  && sudo bash xiyifang-main/deploy/install.sh
+```
+
+[`deploy/install.sh`](deploy/install.sh) 会：
+
+- 找一个 22.13 以上的 Node.js（宝塔装的也行），没有就从国内镜像下载一个只给本系统用，不影响服务器上的其他程序
+- 程序放在 `/www/wwwroot/xiyifang/app`，数据放在 `/www/wwwroot/xiyifang/data`（没有宝塔时是 `/opt/xiyifang`）
+- 建系统服务 `xiyifang`，开机自动启动，崩了自动拉起来；只监听本机 `127.0.0.1:3100`，外面通过反向代理访问，不用在防火墙放行端口
+- 不改 nginx、不改防火墙，不动服务器上的其他网站
+
+**升级**：再运行一次同样的命令。只换程序，数据不动；换之前先把数据库备份到 `/www/wwwroot/xiyifang/before-upgrade/`，新程序启动不了会自动退回上一版。
+
+### 2. 绑定域名和 HTTPS（宝塔）
+
+1. 在域名解析里加一条记录：主机记录 `xiyi`，类型 `A`，记录值填服务器公网 IP（国内服务器的域名要先备案；主域名备案过了，子域名不用另外备案）。
+2. 宝塔「网站 → 反向代理 → 添加反代」：域名填 `xiyi.你的域名`，目标 URL 填 `http://127.0.0.1:3100`。
+3. 这个站点的「SSL」→ Let's Encrypt 申请证书，打开「强制 HTTPS」。
+4. 浏览器打开 `https://xiyi.你的域名`。**系统里还没有账号时，谁先打开谁就能创建店长账号**，所以装好后要马上自己打开创建（或者先按下面导入店里的数据）。
+
+### 3. 把店里电脑的数据搬过去
+
+1. 选一个关店以后的时间，店长在店里电脑上「系统设置 → 数据备份」下载一份（文件名 `洗衣房数据备份-时间.db`）。下载之后店里电脑就不要再开单了。
+2. 用宝塔「文件」把它上传到服务器的 `/www/wwwroot/xiyifang/` 文件夹。
+3. 服务器终端里运行（文件名换成实际的）：
+
+   ```bash
+   sudo bash /www/wwwroot/xiyifang/app/deploy/install.sh --import /www/wwwroot/xiyifang/洗衣房数据备份-时间.db
+   ```
+
+   它会先显示备份里有多少账号、客户、订单和最后一单的时间，核对一下是不是最新的；服务器上原来的数据会先挪到 `before-upgrade/` 留底。账号密码和店里电脑上的一样。
+
+第一次安装时，如果 `/www/wwwroot/xiyifang/` 里已经有上传好的备份，会自动导入最新的一份，不用加 `--import`。
+
+### 4. 店里连着打印机的电脑
+
+1. 在系统文件夹（有 `start.bat` 的那个）里新建一个文本文件 `server-url.txt`，里面只写一行服务器网址，比如 `https://xiyi.example.com`。
+2. 之后双击 `start.bat`（或开机自动启动）不会再在本机启动系统，而是直接打开服务器的「直接打印」窗口，打印不弹预览；`open-direct-print.bat` 也一样。第一次要在这个窗口里登录一次。
+3. 手机开单要打标签的，照旧在这台电脑上开「打印站」。
+
+### 服务器上的常用命令
+
+```bash
+systemctl status xiyifang          # 看状态
+journalctl -u xiyifang -n 100      # 看最近的日志
+systemctl restart xiyifang         # 重启
+```
+
+- 端口等配置在 `/www/wwwroot/xiyifang/xiyifang.env`，改了以后重启。
+- 数据每天自动备份到 `/www/wwwroot/xiyifang/data/backups/`（留 30 天），但备份和数据在同一台服务器上。建议在云控制台给服务器开定期快照，店长每周再在「系统设置 → 数据备份」下载一份。
+- 恢复备份：按上面第 3 步用 `--import` 导入要恢复的那份（比如 `data/backups/` 里某一天的），脚本会先停系统、把现在的数据留底。
+- 忘记密码：`cd /www/wwwroot/xiyifang/app && runuser -u www -- env DATA_DIR=/www/wwwroot/xiyifang/data /usr/local/bin/xiyifang-node --disable-warning=ExperimentalWarning scripts/reset-password.js 用户名 新密码`
 
 可用环境变量：`PORT`（端口，默认 3000）、`HOST`（默认 0.0.0.0）、`DATA_DIR`（数据目录，默认 data）、`APP_TIMEZONE`（默认 Asia/Shanghai）。
 

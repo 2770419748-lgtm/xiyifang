@@ -2,6 +2,13 @@
 chcp 65001 >nul
 cd /d "%~dp0"
 title Laundry System
+rem When the system has moved to a cloud server (server-url.txt exists), do not start a local copy:
+rem just open the server in the direct-print window, so the shop never ends up with two sets of data.
+if exist "server-url.txt" (
+  echo The laundry system now runs on the server. Opening it in the browser...
+  call "%~dp0open-direct-print.bat"
+  exit /b 0
+)
 where node >nul 2>nul
 if errorlevel 1 (
   echo [!] Node.js not found. Please install Node.js 22 LTS: https://nodejs.org/zh-cn
